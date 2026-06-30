@@ -1,0 +1,60 @@
+---
+- name: Ensure postgresql daemon is started on the primary node
+  ansible.builtin.service:
+    name: "{{ _postgresql_daemon }}"
+    state: started
+
+- name: Ensure replication user is present
+  community.postgresql.postgresql_user:
+    name: "{{ postgresql_replication_user }}"
+    password: "{{ postgresql_replication_password }}"
+    encrypted: true
+    expires: infinity
+    role_attr_flags: REPLICATION
+    state: present
+    # connection options
+    ca_cert: "{{ postgresql_conn_vars.ca_cert | d(omit, true) }}"
+    connect_params: "{{ postgresql_conn_vars.connect_params | d(omit, true) }}"
+    login_host: "{{ postgresql_conn_vars.login_host | d(omit, true) }}"
+    login_password: "{{ postgresql_conn_vars.login_password | d(omit, true) }}"
+    login_unix_socket: "{{ postgresql_conn_vars.login_unix_socket | d(omit, true) }}"
+    login_user: "{{ postgresql_conn_vars.login_user | d(omit, true) }}"
+    login_port: "{{ postgresql_conn_vars.login_port | d(omit, true) }}"
+    session_role: "{{ postgresql_conn_vars.session_role | d(omit, true) }}"
+    ssl_cert: "{{ postgresql_conn_vars.ssl_cert | d(omit, true) }}"
+    ssl_key: "{{ postgresql_conn_vars.ssl_key | d(omit, true) }}"
+    ssl_mode: "{{ postgresql_conn_vars.ssl_mode | d(omit, true) }}"
+  no_log: "{{ postgresql_users_no_log }}"
+  become: true
+  become_user: "{{ postgresql_user }}"
+  # See: https://github.com/ansible/ansible/issues/16048#issuecomment-229012509
+  vars:
+    ansible_ssh_pipelining: true
+    ansible_python_interpreter: "{{ _postgresql_ansible_python_interpreter }}"
+
+- name: Manage replication slots (with ansible module)
+  community.postgresql.postgresql_slot:
+    name: "{{ item.slot_name }}"
+    slot_type: "{{ item.slot_type | d(omit, true) }}"
+    state: "{{ item.state | d(omit, true) }}"
+    db: "{{ item.db | d(omit, true) }}"
+    output_plugin: "{{ item.output_plugin | d(omit, true) }}"
+    immediately_reserve: "{{ item.immediately_reserve | d(omit, true) }}"
+    # connection options
+    ca_cert: "{{ postgresql_conn_vars.ca_cert | d(omit, true) }}"
+    connect_params: "{{ postgresql_conn_vars.connect_params | d(omit, true) }}"
+    login_host: "{{ postgresql_conn_vars.login_host | d(omit, true) }}"
+    login_password: "{{ postgresql_conn_vars.login_password | d(omit, true) }}"
+    login_unix_socket: "{{ postgresql_conn_vars.login_unix_socket | d(omit, true) }}"
+    login_user: "{{ postgresql_conn_vars.login_user | d(omit, true) }}"
+    login_port: "{{ postgresql_conn_vars.login_port | d(omit, true) }}"
+    session_role: "{{ postgresql_conn_vars.session_role | d(omit, true) }}"
+    ssl_cert: "{{ postgresql_conn_vars.ssl_cert | d(omit, true) }}"
+    ssl_key: "{{ postgresql_conn_vars.ssl_key | d(omit, true) }}"
+    ssl_mode: "{{ postgresql_conn_vars.ssl_mode | d(omit, true) }}"
+  become: true
+  become_user: "{{ postgresql_user }}"
+  vars:
+    ansible_ssh_pipelining: true
+    ansible_python_interpreter: "{{ _postgresql_ansible_python_interpreter }}"
+  loop: "{{ postgresql_replication_slots }}"

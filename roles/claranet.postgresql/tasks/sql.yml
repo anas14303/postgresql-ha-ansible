@@ -1,0 +1,62 @@
+---
+- name: Run queries.
+  community.postgresql.postgresql_query:
+    query: "{{ item.query }}"
+    db: "{{ item.db | default(omit) }}"
+    named_args: "{{ item.named_args | d(omit) }}"
+    positional_args: "{{ item.positional_args | d(omit) }}"
+    autocommit: "{{ item.autocommit | d(omit) }}"
+    encoding: "{{ item.encoding | d(omit) }}"
+    search_path: "{{ item.search_path | d(omit) }}"
+    trust_input: "{{ item.trust_input | d(omit) }}"
+    # connection options
+    ca_cert: "{{ postgresql_conn_vars.ca_cert | d(omit, true) }}"
+    connect_params: "{{ postgresql_conn_vars.connect_params | d(omit, true) }}"
+    login_host: "{{ postgresql_conn_vars.login_host | d(omit, true) }}"
+    login_password: "{{ postgresql_conn_vars.login_password | d(omit, true) }}"
+    login_unix_socket: "{{ postgresql_conn_vars.login_unix_socket | d(omit, true) }}"
+    login_user: "{{ postgresql_conn_vars.login_user | d(omit, true) }}"
+    login_port: "{{ postgresql_conn_vars.login_port | d(omit, true) }}"
+    session_role: "{{ postgresql_conn_vars.session_role | d(omit, true) }}"
+    ssl_cert: "{{ postgresql_conn_vars.ssl_cert | d(omit, true) }}"
+    ssl_key: "{{ postgresql_conn_vars.ssl_key | d(omit, true) }}"
+    ssl_mode: "{{ postgresql_conn_vars.ssl_mode | d(omit, true) }}"
+  loop: "{{ postgresql_queries }}"
+  no_log: "{{ postgresql_users_no_log }}"
+  become: true
+  become_user: "{{ postgresql_user }}"
+  vars:
+    ansible_ssh_pipelining: true
+    ansible_python_interpreter: "{{ _postgresql_ansible_python_interpreter }}"
+
+
+- name: Run SQL scripts files.
+  community.postgresql.postgresql_script:
+    path: "{{ item.path }}"
+    db: "{{ item.db | default(omit) }}"
+    named_args: "{{ item.named_args | d(omit) }}"
+    positional_args: "{{ item.positional_args | d(omit) }}"
+    encoding: "{{ item.encoding | d(omit) }}"
+    search_path: "{{ item.search_path | d(omit) }}"
+    trust_input: "{{ item.trust_input | d(omit) }}"
+    # connection options
+    ca_cert: "{{ postgresql_conn_vars.ca_cert | d(omit, true) }}"
+    connect_params: "{{ postgresql_conn_vars.connect_params | d(omit, true) }}"
+    login_host: "{{ postgresql_conn_vars.login_host | d(omit, true) }}"
+    login_password: "{{ postgresql_conn_vars.login_password | d(omit, true) }}"
+    login_unix_socket: "{{ postgresql_conn_vars.login_unix_socket | d(omit, true) }}"
+    login_user: "{{ postgresql_conn_vars.login_user | d(omit, true) }}"
+    login_port: "{{ postgresql_conn_vars.login_port | d(omit, true) }}"
+    session_role: "{{ postgresql_conn_vars.session_role | d(omit, true) }}"
+    ssl_cert: "{{ postgresql_conn_vars.ssl_cert | d(omit, true) }}"
+    ssl_key: "{{ postgresql_conn_vars.ssl_key | d(omit, true) }}"
+    ssl_mode: "{{ postgresql_conn_vars.ssl_mode | d(omit, true) }}"
+  loop: "{{ postgresql_scripts }}"
+  no_log: "{{ postgresql_users_no_log }}"
+  changed_when: false
+  become: true
+  become_user: "{{ postgresql_user }}"
+  when: not ansible_check_mode
+  vars:
+    ansible_ssh_pipelining: true
+    ansible_python_interpreter: "{{ _postgresql_ansible_python_interpreter }}"

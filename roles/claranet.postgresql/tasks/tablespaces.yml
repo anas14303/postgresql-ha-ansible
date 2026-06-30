@@ -1,0 +1,48 @@
+---
+- name: Manage tablespaces location.
+  ansible.builtin.file:
+    path: "{{ item.location }}"
+    state: directory
+    owner: "{{ item.location_owner | d(postgresql_user) }}"
+    group: "{{ item.location_group | d(postgresql_user) }}"
+    mode: "{{ item.location_mode | d('0700') }}"
+  when:
+    - item.location_create | d(false)
+    - (item.state | d('present')) == 'present'
+  loop: "{{ postgresql_tablespaces }}"
+
+- name: Manage tablespaces
+  when: not postgresql_replication or postgresql_replication_role == "primary"
+  become: true
+  become_user: "{{ postgresql_user }}"
+  no_log: "{{ postgresql_users_no_log }}"
+  vars:
+    ansible_ssh_pipelining: true
+    ansible_python_interpreter: "{{ _postgresql_ansible_python_interpreter }}"
+  block:
+    - name: Manage tablespaces.
+      community.postgresql.postgresql_tablespace:
+        name: "{{ item.name }}"
+        state: "{{ item.state | d(omit) }}"
+        rename_to: "{{ ((item.state | d('present')) == 'present') | ternary(item.rename_to | d(omit), omit) }}"
+        set: "{{ ((item.state | d('present')) == 'present') | ternary(item.set | d(omit), omit) }}"
+        owner: "{{ ((item.state | d('present')) == 'present') | ternary(item.owner | d(omit), omit) }}"
+        location: "{{ ((item.state | d('present')) == 'present') | ternary(item.location | d(omit), omit) }}"
+        trust_input: "{{ item.trust_input | d(omit) }}"
+        # connection options
+        ca_cert: "{{ postgresql_conn_vars.ca_cert | d(omit, true) }}"
+        connect_params: "{{ postgresql_conn_vars.connect_params | d(omit, true) }}"
+        login_host: "{{ postgresql_conn_vars.login_host | d(omit, true) }}"
+        login_password: "{{ postgresql_conn_vars.login_password | d(omit, true) }}"
+        login_unix_socket: "{{ postgresql_conn_vars.login_unix_socket | d(omit, true) }}"
+        login_user: "{{ postgresql_conn_vars.login_user | d(omit, true) }}"
+        login_port: "{{ postgresql_conn_vars.login_port | d(omit, true) }}"
+        session_role: "{{ postgresql_conn_vars.session_role | d(omit, true) }}"
+        ssl_cert: "{{ postgresql_conn_vars.ssl_cert | d(omit, true) }}"
+        ssl_key: "{{ postgresql_conn_vars.ssl_key | d(omit, true) }}"
+        ssl_mode: "{{ postgresql_conn_vars.ssl_mode | d(omit, true) }}"
+      register: tbspc_mgmt_res
+      failed_when:
+        - tbspc_mgmt_res.failed
+        - not(item.state == 'absent' and 'Tries to drop nonexistent tablespace' in tbspc_mgmt_res.msg)
+      loop: "{{ postgresql_tablespaces }}"

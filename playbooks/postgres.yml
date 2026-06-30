@@ -1,0 +1,23 @@
+---
+- name: Determine current Patroni leader
+  hosts: postgres_cluster
+  become: yes
+  tasks:
+    - name: Query Patroni for current role
+      ansible.builtin.uri:
+        url: "http://localhost:8008/master"
+        status_code: [200, 503]
+      register: patroni_master_check
+      failed_when: false
+      changed_when: false
+
+    - name: Set fact - this node is primary
+      ansible.builtin.set_fact:
+        is_primary: "{{ patroni_master_check.status == 200 }}"
+
+- name: Deploy PostgreSQL cluster
+  hosts: postgres_cluster
+  become: yes
+  roles:
+    - role: claranet.postgresql
+      postgresql_manage_objects: "{{ hostvars[inventory_hostname]['is_primary'] | default(false) }}"

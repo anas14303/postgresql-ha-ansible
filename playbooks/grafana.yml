@@ -1,0 +1,6 @@
+---
+- name: Deploy Grafana server
+  hosts: primary
+  become: yes
+  roles:
+    - role: grafana.grafana.grafana

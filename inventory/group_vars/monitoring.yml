@@ -1,0 +1,47 @@
+# =============================================================
+# Monitoring configuration (Phase 6)
+# =============================================================
+
+# --- node_exporter ---
+node_exporter_enabled_collectors:
+  - systemd
+
+# --- postgres_exporter ---
+postgres_exporter_env:
+  DATA_SOURCE_NAME: "postgresql://postgres_exporter:Exp0rt3r#2024@localhost:5432/postgres?sslmode=disable"
+
+postgres_exporter_user: postgres_exporter
+postgres_exporter_password: "Exp0rt3r#2024"
+
+# --- Prometheus scrape targets ---
+prometheus_targets:
+  node:
+    - targets:
+        - 192.168.163.129:9100
+        - 192.168.163.128:9100
+      labels:
+        env: lab
+  postgres:
+    - targets:
+        - 192.168.163.129:9187
+        - 192.168.163.128:9187
+      labels:
+        env: lab
+
+prometheus_scrape_configs:
+  - job_name: "node_exporter"
+    file_sd_configs:
+      - files:
+          - "{{ prometheus_config_dir }}/file_sd/node.yml"
+
+  - job_name: "postgres_exporter"
+    file_sd_configs:
+      - files:
+          - "{{ prometheus_config_dir }}/file_sd/postgres.yml"
+
+  - job_name: "patroni"
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 192.168.163.129:8008
+          - 192.168.163.128:8008
