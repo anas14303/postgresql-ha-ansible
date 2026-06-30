@@ -1,0 +1,9 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd:
+
+- name: Reload postgresql
+  ansible.builtin.service:
+    name: "{{ _postgresql_daemon }}"
+    state: "{{ _postgresql_config_change_handler_state }}"
+    sleep: 5

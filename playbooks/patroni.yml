@@ -1,0 +1,6 @@
+---
+- name: Deploy Patroni HA cluster
+  hosts: postgres_cluster
+  become: yes
+  roles:
+    - role: claranet.patroni

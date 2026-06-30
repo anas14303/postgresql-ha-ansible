@@ -1,0 +1,15 @@
+---
+# Deploy node_exporter and postgres_exporter on both VMs
+- name: Deploy exporters on all cluster nodes
+  hosts: postgres_cluster
+  become: yes
+  roles:
+    - role: prometheus.prometheus.node_exporter
+    - role: prometheus.prometheus.postgres_exporter
+
+# Deploy Prometheus server on VM1 only
+- name: Deploy Prometheus server
+  hosts: primary
+  become: yes
+  roles:
+    - role: prometheus.prometheus.prometheus

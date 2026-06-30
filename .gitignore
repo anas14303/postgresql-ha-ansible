@@ -1,0 +1,10 @@
+# Ansible
+*.retry
+.ansible/
+
+# Local secrets if you later split them out
+vault_pass.txt
+*.vault
+
+# OS
+.DS_Store

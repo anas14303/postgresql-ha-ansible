@@ -1,0 +1,6 @@
+---
+- import_playbook: postgres.yml
+- import_playbook: patroni.yml
+- import_playbook: backup.yml
+- import_playbook: monitoring.yml
+- import_playbook: grafana.yml

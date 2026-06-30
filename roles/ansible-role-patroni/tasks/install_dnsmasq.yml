@@ -1,0 +1,30 @@
+---
+- name: Install dnsmasq
+  ansible.builtin.package:
+    name: dnsmasq
+
+- name: Create /etc/dnsmasq.conf
+  ansible.builtin.template:
+    src: etc/dnsmasq.conf.j2
+    dest: /etc/dnsmasq.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart dnsmasq
+
+- name: Create /etc/systemd-resolved.conf.d
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure systemd-resolved conf uses dnsmasq
+  ansible.builtin.template:
+    src: templates/etc/systemd/resolved.conf.d/dnsmasq.conf.j2
+    dest: /etc/systemd/resolved.conf.d/dnsmasq.conf
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart systemd-resolved

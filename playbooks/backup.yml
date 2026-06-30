@@ -1,0 +1,11 @@
+---
+- name: Apply backup configuration only on primary
+  hosts: postgres_cluster
+  become: yes
+  roles:
+    - role: claranet.postgresql
+      postgresql_backup: "{{ hostvars[inventory_hostname]['is_primary'] | default(false) }}"
+      postgresql_install: false
+      postgresql_initialize: false
+      postgresql_configure: false
+      postgresql_manage_objects: false
