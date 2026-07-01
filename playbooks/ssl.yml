@@ -1,0 +1,68 @@
+---
+- name: Generate self-signed SSL certificates for PostgreSQL
+  hosts: postgres_cluster
+  become: yes
+  tasks:
+    - name: Ensure openssl is installed
+      ansible.builtin.apt:
+        name: openssl
+        state: present
+
+    - name: Create PostgreSQL SSL directory
+      ansible.builtin.file:
+        path: /etc/postgresql/ssl
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0750'
+
+    - name: Generate CA private key
+      ansible.builtin.command:
+        cmd: >
+          openssl genrsa -out /etc/postgresql/ssl/ca.key 4096
+        creates: /etc/postgresql/ssl/ca.key
+
+    - name: Generate CA certificate
+      ansible.builtin.command:
+        cmd: >
+          openssl req -new -x509 -days 3650 -key /etc/postgresql/ssl/ca.key
+          -out /etc/postgresql/ssl/ca.crt
+          -subj "/CN=PostgreSQL-CA/O=Lab/C=TN"
+        creates: /etc/postgresql/ssl/ca.crt
+
+    - name: Generate server private key
+      ansible.builtin.command:
+        cmd: >
+          openssl genrsa -out /etc/postgresql/ssl/server.key 4096
+        creates: /etc/postgresql/ssl/server.key
+
+    - name: Generate server CSR
+      ansible.builtin.command:
+        cmd: >
+          openssl req -new -key /etc/postgresql/ssl/server.key
+          -out /etc/postgresql/ssl/server.csr
+          -subj "/CN={{ ansible_host }}/O=Lab/C=TN"
+        creates: /etc/postgresql/ssl/server.csr
+
+    - name: Sign server certificate with CA
+      ansible.builtin.command:
+        cmd: >
+          openssl x509 -req -days 3650
+          -in /etc/postgresql/ssl/server.csr
+          -CA /etc/postgresql/ssl/ca.crt
+          -CAkey /etc/postgresql/ssl/ca.key
+          -CAcreateserial
+          -out /etc/postgresql/ssl/server.crt
+        creates: /etc/postgresql/ssl/server.crt
+
+    - name: Set correct ownership and permissions
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: postgres
+        group: postgres
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: /etc/postgresql/ssl/ca.key,     mode: '0400' }
+        - { path: /etc/postgresql/ssl/ca.crt,     mode: '0444' }
+        - { path: /etc/postgresql/ssl/server.key, mode: '0400' }
+        - { path: /etc/postgresql/ssl/server.crt, mode: '0444' }

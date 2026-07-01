@@ -1,0 +1,43 @@
+---
+- name: Determine current Patroni leader
+  hosts: postgres_cluster
+  become: yes
+  tasks:
+    - name: Query Patroni for current role
+      ansible.builtin.uri:
+        url: "http://localhost:8008/master"
+        status_code: [200, 503]
+      register: patroni_master_check
+      failed_when: false
+      changed_when: false
+
+    - name: Set fact - this node is primary
+      ansible.builtin.set_fact:
+        is_primary: "{{ patroni_master_check.status == 200 }}"
+
+- name: Ship backups from leader to replica
+  hosts: postgres_cluster
+  become: yes
+  tasks:
+    - name: Ensure rsync is installed
+      ansible.builtin.apt:
+        name: rsync
+        state: present
+
+    - name: Ensure backup transfer directory exists on replica
+      ansible.builtin.file:
+        path: /var/backups/postgresql-remote
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0750'
+      when: not hostvars[inventory_hostname]['is_primary'] | default(false)
+
+    - name: Sync backups from leader to replica via rsync
+      ansible.builtin.command:
+        cmd: >
+          rsync -avz --delete
+          /var/backups/postgresql/
+          postgres@{{ groups['replicas'][0] if hostvars[inventory_hostname]['is_primary'] else groups['primary'][0] }}:/var/backups/postgresql-remote/
+      when: hostvars[inventory_hostname]['is_primary'] | default(false)
+      changed_when: true
