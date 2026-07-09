@@ -7,4 +7,4 @@ postgresql_replication_replica_addresses:
   - 192.168.163.128/32
 
 postgresql_replication_user: replicator
-postgresql_replication_password: "REDACTED"
+postgresql_replication_password: "NEW_VALUE_2"

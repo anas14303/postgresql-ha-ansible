@@ -1,0 +1,15 @@
+---
+keycloak_version: "26.0.7"
+keycloak_admin: "admin"
+keycloak_admin_password: "{{ vault_keycloak_admin_password }}"
+keycloak_db_url: "jdbc:postgresql://192.168.163.129,192.168.163.128/keycloak?targetServerType=primary&loadBalanceHosts=true"
+keycloak_db_name: keycloak
+keycloak_db_user: keycloak
+keycloak_db_password: "{{ vault_keycloak_db_password }}"
+keycloak_hostname: "auth.homelab.local"
+keycloak_https_port: 8443
+keycloak_http_port: 8080
+keycloak_http_management_port: 9000
+vault_addr: "https://192.168.163.131:8200"
+vault_pki_path: "pki_int"
+vault_pki_role: "keycloak"

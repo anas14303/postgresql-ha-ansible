@@ -1,0 +1,8 @@
+---
+haproxy_template: "/home/asus/postgres-devops/templates/haproxy.cfg.j2"
+haproxy_frontend_port: 443
+haproxy_backend_servers:
+  - name: keycloak1
+    address: 192.168.163.132:8080
+  - name: keycloak2
+    address: 192.168.163.133:8080

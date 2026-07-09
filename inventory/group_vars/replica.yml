@@ -4,4 +4,4 @@ postgresql_replication_role: replica
 postgresql_replication_primary_inventory_name: vm1
 postgresql_replication_primary_address: 192.168.163.129
 postgresql_replication_user: replicator
-postgresql_replication_password: "REDACTED"
+postgresql_replication_password: "NEW_VALUE_2"

@@ -1,0 +1,53 @@
+---
+- name: Install and configure Keepalived
+  hosts: haproxy
+  become: yes
+  tasks:
+    - name: Install keepalived
+      ansible.builtin.apt:
+        name: keepalived
+        state: present
+        update_cache: yes
+
+    - name: Enable IP forwarding and non-local bind
+      ansible.posix.sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { name: net.ipv4.ip_forward, value: '1' }
+        - { name: net.ipv4.ip_nonlocal_bind, value: '1' }
+
+    - name: Create keepalived configuration
+      ansible.builtin.copy:
+        dest: /etc/keepalived/keepalived.conf
+        content: |
+          vrrp_instance VI_1 {
+              state MASTER
+              interface ens33
+              virtual_router_id 51
+              priority 100
+              advert_int 1
+              authentication {
+                  auth_type PASS
+                  auth_pass K33p@l1v3d
+              }
+              virtual_ipaddress {
+                  192.168.163.100/24
+              }
+          }
+        mode: '0644'
+      notify: Restart keepalived
+
+    - name: Enable and start keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Restart keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted

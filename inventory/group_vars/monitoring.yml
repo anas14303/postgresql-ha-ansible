@@ -8,10 +8,9 @@ node_exporter_enabled_collectors:
 
 # --- postgres_exporter ---
 postgres_exporter_env:
-  DATA_SOURCE_NAME: "postgresql://postgres_exporter:REDACTED@localhost:5432/postgres?sslmode=disable"
-
+  DATA_SOURCE_NAME: "postgresql://postgres_exporter:{{ vault_postgres_exporter_password }}@localhost:5432/postgres?sslmode=disable"
 postgres_exporter_user: postgres_exporter
-postgres_exporter_password: "REDACTED"
+postgres_exporter_password: "{{ vault_postgres_exporter_password }}"
 
 # --- Prometheus scrape targets ---
 prometheus_targets:

@@ -1,0 +1,6 @@
+---
+- name: Deploy Keycloak HA cluster
+  hosts: keycloak
+  become: yes
+  roles:
+    - keycloak

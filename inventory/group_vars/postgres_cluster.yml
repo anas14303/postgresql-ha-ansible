@@ -6,7 +6,7 @@ patroni_namespace: /service/
 
 # DCS: etcd
 patroni_dcs: etcd
-patroni_etcd_hosts: "192.168.163.129:2379"
+patroni_etcd_hosts: "192.168.163.129:2379,192.168.163.128:2379,192.168.163.134:2379"
 
 # PostgreSQL version
 patroni_postgresql_version: 16
@@ -14,9 +14,9 @@ patroni_postgresql_port: 5432
 
 # Users
 patroni_superuser_username: postgres
-patroni_superuser_password: "REDACTED"
+patroni_superuser_password: "{{ vault_patroni_superuser_password }}"
 patroni_replication_username: replicator
-patroni_replication_password: "REDACTED"
+patroni_replication_password: "{{ vault_patroni_replication_password }}"
 
 # Installation
 patroni_install: true
@@ -28,14 +28,16 @@ patroni_postgresql_pg_hba:
   - { type: "host", database: "all", user: "all", address: "127.0.0.1/32", method: "scram-sha-256" }
   - { type: "host", database: "all", user: "all", address: "::1/128", method: "scram-sha-256" }
   - { type: "host", database: "replication", user: "replicator", address: "0.0.0.0/0", method: "scram-sha-256" }
+  - { type: "host", database: "keycloak", user: "keycloak", address: "192.168.163.132/32", method: "scram-sha-256" }
+  - { type: "host", database: "keycloak", user: "keycloak", address: "192.168.163.133/32", method: "scram-sha-256" }
 
 # PostgreSQL parameters
 patroni_postgresql_parameters:
   - { option: "unix_socket_directories", value: "/var/run/postgresql" }
   - { option: "wal_log_hints", value: "on" }
 
-# Watchdog off for lab
-patroni_watchdog_mode: 'off'
+# Watchdog required — verified working via promotion test 2026-07-09
+patroni_watchdog_mode: 'required'
 
 # REST API
 patroni_restapi_port: 8008

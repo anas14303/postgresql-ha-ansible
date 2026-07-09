@@ -1,0 +1,138 @@
+---
+- name: Install and configure Vault
+  hosts: vault
+  become: yes
+  vars:
+    vault_version: "1.20.4"
+    vault_install_dir: /usr/local/bin
+    vault_config_dir: /etc/vault.d
+    vault_data_dir: /var/lib/vault
+    vault_log_dir: /var/log/vault
+
+  tasks:
+    - name: Install dependencies
+      ansible.builtin.apt:
+        name:
+          - curl
+          - unzip
+          - jq
+        state: present
+        update_cache: yes
+
+    - name: Create vault system group
+      ansible.builtin.group:
+        name: vault
+        system: yes
+        state: present
+
+    - name: Create vault system user
+      ansible.builtin.user:
+        name: vault
+        group: vault
+        system: yes
+        shell: /bin/false
+        home: "{{ vault_data_dir }}"
+        create_home: no
+
+    - name: Create vault directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: vault
+        group: vault
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ vault_config_dir }}", mode: '0750' }
+        - { path: "{{ vault_data_dir }}", mode: '0750' }
+        - { path: "{{ vault_log_dir }}", mode: '0750' }
+
+    - name: Download Vault binary
+      ansible.builtin.get_url:
+        url: "https://releases.hashicorp.com/vault/{{ vault_version }}/vault_{{ vault_version }}_linux_amd64.zip"
+        dest: /tmp/vault.zip
+        mode: '0644'
+
+    - name: Unzip Vault binary
+      ansible.builtin.unarchive:
+        src: /tmp/vault.zip
+        dest: "{{ vault_install_dir }}"
+        remote_src: yes
+        mode: '0755'
+
+    - name: Set vault binary capabilities (memory lock)
+      ansible.builtin.command:
+        cmd: setcap cap_ipc_lock=+ep {{ vault_install_dir }}/vault
+
+    - name: Create Vault configuration file
+      ansible.builtin.copy:
+        dest: "{{ vault_config_dir }}/vault.hcl"
+        owner: vault
+        group: vault
+        mode: '0640'
+        content: |
+          ui            = true
+          disable_mlock = false
+
+          storage "file" {
+            path = "{{ vault_data_dir }}"
+          }
+
+          listener "tcp" {
+            address       = "0.0.0.0:8200"
+            tls_cert_file = "/etc/ssl/cluster/server.crt"
+            tls_key_file  = "/etc/ssl/cluster/server.key"
+          }
+
+          api_addr     = "https://192.168.163.131:8200"
+          cluster_addr = "https://192.168.163.131:8201"
+
+    - name: Create Vault systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/vault.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=HashiCorp Vault
+          Documentation=https://developer.hashicorp.com/vault/docs
+          Requires=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=vault
+          Group=vault
+          ExecStart={{ vault_install_dir }}/vault server -config={{ vault_config_dir }}/vault.hcl
+          ExecReload=/bin/kill --signal HUP $MAINPID
+          KillMode=process
+          KillSignal=SIGINT
+          Restart=on-failure
+          RestartSec=5
+          TimeoutStopSec=30
+          LimitNOFILE=65536
+          LimitMEMLOCK=infinity
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Vault
+      ansible.builtin.systemd:
+        name: vault
+        daemon_reload: yes
+        enabled: yes
+        state: started
+
+    - name: Wait for Vault to be ready
+      ansible.builtin.wait_for:
+        host: 192.168.163.131
+        port: 8200
+        timeout: 30
+
+    - name: Check Vault status
+      ansible.builtin.command:
+        cmd: "{{ vault_install_dir }}/vault status -address=https://192.168.163.131:8200 -tls-skip-verify"
+      register: vault_status
+      failed_when: false
+      changed_when: false
+
+    - name: Show Vault status
+      ansible.builtin.debug:
+        msg: "{{ vault_status.stdout_lines }}"

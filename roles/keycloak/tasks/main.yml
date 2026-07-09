@@ -1,0 +1,142 @@
+---
+- name: Install Java and dependencies
+  ansible.builtin.apt:
+    name:
+      - openjdk-21-jdk
+      - curl
+      - jq
+    state: present
+    update_cache: yes
+
+- name: Create keycloak system group
+  ansible.builtin.group:
+    name: keycloak
+    system: yes
+
+- name: Create keycloak system user
+  ansible.builtin.user:
+    name: keycloak
+    group: keycloak
+    system: yes
+    shell: /usr/sbin/nologin
+    home: /opt/keycloak
+    create_home: no
+
+- name: Download Keycloak
+  ansible.builtin.get_url:
+    url: "https://github.com/keycloak/keycloak/releases/download/{{ keycloak_version }}/keycloak-{{ keycloak_version }}.tar.gz"
+    dest: "/tmp/keycloak-{{ keycloak_version }}.tar.gz"
+    mode: '0644'
+
+- name: Extract Keycloak
+  ansible.builtin.unarchive:
+    src: "/tmp/keycloak-{{ keycloak_version }}.tar.gz"
+    dest: /opt
+    remote_src: yes
+    owner: keycloak
+    group: keycloak
+    creates: "/opt/keycloak-{{ keycloak_version }}"
+
+- name: Symlink /opt/keycloak
+  ansible.builtin.file:
+    src: "/opt/keycloak-{{ keycloak_version }}"
+    dest: /opt/keycloak
+    state: link
+    force: yes
+
+- name: Ensure Keycloak conf directory exists
+  ansible.builtin.file:
+    path: /opt/keycloak/conf
+    state: directory
+    owner: keycloak
+    group: keycloak
+    mode: '0750'
+
+- name: Authenticate to Vault via AppRole
+  ansible.builtin.uri:
+    url: "{{ vault_addr }}/v1/auth/approle/login"
+    method: POST
+    body_format: json
+    body:
+      role_id: "{{ vault_role_id }}"
+      secret_id: "{{ vault_secret_id }}"
+    validate_certs: no
+    return_content: yes
+  register: vault_login
+  no_log: true
+
+- name: Request TLS certificate from Vault PKI
+  ansible.builtin.uri:
+    url: "{{ vault_addr }}/v1/{{ vault_pki_path }}/issue/{{ vault_pki_role }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_login.json.auth.client_token }}"
+    body_format: json
+    body:
+      common_name: "{{ keycloak_node_fqdn }}"
+      alt_names: "{{ keycloak_hostname }}"
+      ip_sans: "{{ ansible_host }}"
+      ttl: "720h"
+    validate_certs: no
+    return_content: yes
+  register: vault_cert
+  no_log: true
+
+- name: Write TLS certificate files
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ item.dest }}"
+    owner: keycloak
+    group: keycloak
+    mode: '0640'
+  no_log: true
+  loop:
+    - content: "{{ vault_cert.json.data.certificate }}"
+      dest: /opt/keycloak/conf/server.crt.pem
+    - content: "{{ vault_cert.json.data.private_key }}"
+      dest: /opt/keycloak/conf/server.key.pem
+    - content: "{{ vault_cert.json.data.issuing_ca }}"
+      dest: /opt/keycloak/conf/ca.pem
+
+- name: Deploy keycloak.conf
+  ansible.builtin.template:
+    src: keycloak.conf.j2
+    dest: /opt/keycloak/conf/keycloak.conf
+    owner: keycloak
+    group: keycloak
+    mode: '0640'
+  notify: restart keycloak
+
+- name: Deploy JGroups JDBC_PING cache config
+  ansible.builtin.template:
+    src: cache-ispn-jdbc-ping.xml.j2
+    dest: /opt/keycloak/conf/cache-ispn-jdbc-ping.xml
+    owner: keycloak
+    group: keycloak
+    mode: '0640'
+  notify: restart keycloak
+
+- name: Build Keycloak
+  ansible.builtin.command:
+    cmd: /opt/keycloak/bin/kc.sh build --db=postgres
+  become_user: keycloak
+  args:
+    creates: /opt/keycloak/lib/quarkus/generated-bytecode.jar
+  environment:
+    JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
+
+- name: Deploy systemd unit
+  ansible.builtin.template:
+    src: keycloak.service.j2
+    dest: /etc/systemd/system/keycloak.service
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart keycloak
+
+- name: Enable and start Keycloak
+  ansible.builtin.systemd:
+    name: keycloak
+    enabled: yes
+    state: started
+    daemon_reload: yes

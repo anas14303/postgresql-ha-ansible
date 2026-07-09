@@ -1,0 +1,19 @@
+[Unit]
+Description=Keycloak Identity Provider
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=keycloak
+Group=keycloak
+Environment=JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+Environment=KC_HOME=/opt/keycloak
+ExecStart=/opt/keycloak/bin/kc.sh start --optimized
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=102642
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

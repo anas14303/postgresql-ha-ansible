@@ -1,0 +1,24 @@
+db=postgres
+db-url={{ keycloak_db_url }}
+db-username={{ keycloak_db_user }}
+db-password={{ keycloak_db_password }}
+
+cache=ispn
+cache-stack=jdbc-ping
+cache-config-file=cache-ispn-jdbc-ping.xml
+
+https-certificate-file=${kc.home.dir}/conf/server.crt.pem
+https-certificate-key-file=${kc.home.dir}/conf/server.key.pem
+https-port={{ keycloak_https_port }}
+
+hostname={{ keycloak_hostname }}
+hostname-strict=false
+hostname-strict-https=false
+
+health-enabled=true
+metrics-enabled=true
+http-management-port={{ keycloak_http_management_port }}
+
+proxy-headers=xforwarded
+http-enabled=true
+http-port={{ keycloak_http_port }}

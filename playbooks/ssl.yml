@@ -1,6 +1,6 @@
 ---
-- name: Generate self-signed SSL certificates for PostgreSQL
-  hosts: postgres_cluster
+- name: Generate self-signed SSL certificates
+  hosts: all
   become: yes
   tasks:
     - name: Ensure openssl is installed
@@ -8,61 +8,72 @@
         name: openssl
         state: present
 
-    - name: Create PostgreSQL SSL directory
+    - name: Set cert owner (postgres on DB nodes, vault on vault node, root elsewhere)
+      ansible.builtin.set_fact:
+        cert_owner: "{{ 'postgres' if inventory_hostname in groups['postgres_cluster'] else ('vault' if inventory_hostname in groups['vault'] else 'root') }}"
+        cert_group: "{{ 'postgres' if inventory_hostname in groups['postgres_cluster'] else ('vault' if inventory_hostname in groups['vault'] else 'root') }}"
+    - name: Create SSL directory
       ansible.builtin.file:
-        path: /etc/postgresql/ssl
+        path: /etc/ssl/cluster
         state: directory
-        owner: postgres
-        group: postgres
+        owner: "{{ cert_owner }}"
+        group: "{{ cert_group }}"
         mode: '0750'
 
     - name: Generate CA private key
       ansible.builtin.command:
-        cmd: >
-          openssl genrsa -out /etc/postgresql/ssl/ca.key 4096
-        creates: /etc/postgresql/ssl/ca.key
+        cmd: openssl genrsa -out /etc/ssl/cluster/ca.key 4096
+        creates: /etc/ssl/cluster/ca.key
 
     - name: Generate CA certificate
       ansible.builtin.command:
         cmd: >
-          openssl req -new -x509 -days 3650 -key /etc/postgresql/ssl/ca.key
-          -out /etc/postgresql/ssl/ca.crt
-          -subj "/CN=PostgreSQL-CA/O=Lab/C=TN"
-        creates: /etc/postgresql/ssl/ca.crt
+          openssl req -new -x509 -days 3650
+          -key /etc/ssl/cluster/ca.key
+          -out /etc/ssl/cluster/ca.crt
+          -subj "/CN=Cluster-CA/O=Lab/C=TN"
+        creates: /etc/ssl/cluster/ca.crt
 
     - name: Generate server private key
       ansible.builtin.command:
-        cmd: >
-          openssl genrsa -out /etc/postgresql/ssl/server.key 4096
-        creates: /etc/postgresql/ssl/server.key
+        cmd: openssl genrsa -out /etc/ssl/cluster/server.key 4096
+        creates: /etc/ssl/cluster/server.key
 
     - name: Generate server CSR
       ansible.builtin.command:
         cmd: >
-          openssl req -new -key /etc/postgresql/ssl/server.key
-          -out /etc/postgresql/ssl/server.csr
+          openssl req -new
+          -key /etc/ssl/cluster/server.key
+          -out /etc/ssl/cluster/server.csr
           -subj "/CN={{ ansible_host }}/O=Lab/C=TN"
-        creates: /etc/postgresql/ssl/server.csr
+        creates: /etc/ssl/cluster/server.csr
 
     - name: Sign server certificate with CA
       ansible.builtin.command:
         cmd: >
           openssl x509 -req -days 3650
-          -in /etc/postgresql/ssl/server.csr
-          -CA /etc/postgresql/ssl/ca.crt
-          -CAkey /etc/postgresql/ssl/ca.key
+          -in /etc/ssl/cluster/server.csr
+          -CA /etc/ssl/cluster/ca.crt
+          -CAkey /etc/ssl/cluster/ca.key
           -CAcreateserial
-          -out /etc/postgresql/ssl/server.crt
-        creates: /etc/postgresql/ssl/server.crt
+          -out /etc/ssl/cluster/server.crt
+        creates: /etc/ssl/cluster/server.crt
 
     - name: Set correct ownership and permissions
       ansible.builtin.file:
         path: "{{ item.path }}"
-        owner: postgres
-        group: postgres
+        owner: "{{ cert_owner }}"
+        group: "{{ cert_group }}"
         mode: "{{ item.mode }}"
       loop:
-        - { path: /etc/postgresql/ssl/ca.key,     mode: '0400' }
-        - { path: /etc/postgresql/ssl/ca.crt,     mode: '0444' }
-        - { path: /etc/postgresql/ssl/server.key, mode: '0400' }
-        - { path: /etc/postgresql/ssl/server.crt, mode: '0444' }
+        - { path: /etc/ssl/cluster/ca.key,     mode: '0400' }
+        - { path: /etc/ssl/cluster/ca.crt,     mode: '0444' }
+        - { path: /etc/ssl/cluster/server.key, mode: '0400' }
+        - { path: /etc/ssl/cluster/server.crt, mode: '0444' }
+
+    - name: Create PEM bundle (cert + key) for HAProxy
+      ansible.builtin.shell: |
+        cat /etc/ssl/cluster/server.crt /etc/ssl/cluster/server.key > /etc/ssl/cluster/server.pem
+        chmod 440 /etc/ssl/cluster/server.pem
+      args:
+        creates: /etc/ssl/cluster/server.pem

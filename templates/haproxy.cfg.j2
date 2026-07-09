@@ -1,0 +1,55 @@
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    stats socket /var/lib/haproxy/stats level admin
+    chroot /var/lib/haproxy
+    user haproxy
+    group haproxy
+    daemon
+    maxconn 50000
+    ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+    ssl-default-bind-options ssl-min-ver TLSv1.3
+
+defaults
+    log global
+    mode http
+    option httplog
+    option dontlognull
+    option forwardfor
+    option http-server-close
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+    retries 3
+
+#---------------------------------------------------------------------
+# Stats page
+#---------------------------------------------------------------------
+frontend stats
+    bind *:8404
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats admin if LOCALHOST
+
+#---------------------------------------------------------------------
+# Keycloak frontend — TLS 1.3
+#---------------------------------------------------------------------
+frontend keycloak_frontend
+    bind *:443 ssl crt /etc/haproxy/certs/keycloak.pem ssl-min-ver TLSv1.3
+    mode http
+    option httplog
+    http-request set-header X-Forwarded-Proto https
+    http-request set-header X-Forwarded-Port 443
+    default_backend keycloak_backend
+
+#---------------------------------------------------------------------
+# Keycloak backend — active-active, health check via /health/ready
+#---------------------------------------------------------------------
+backend keycloak_backend
+    mode http
+    balance roundrobin
+    option httpchk GET /health/ready
+    http-check expect status 200
+    server keycloak1 192.168.163.132:8080 check inter 5s fall 2 rise 2
+    server keycloak2 192.168.163.133:8080 check inter 5s fall 2 rise 2

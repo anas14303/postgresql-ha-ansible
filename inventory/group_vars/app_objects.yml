@@ -20,16 +20,16 @@ postgresql_databases:
 # Users
 postgresql_users:
   - name: app_admin
-    password: "REDACTED"
+    password: "{{ vault_app_admin_password }}"
     role_attr_flags: NOSUPERUSER,NOCREATEDB,NOCREATEROLE
   - name: app_readwrite
-    password: "REDACTED"
+    password: "{{ vault_app_readwrite_password }}"
     role_attr_flags: NOSUPERUSER,NOCREATEDB,NOCREATEROLE
   - name: app_readonly
-    password: "REDACTED"
+    password: "{{ vault_app_readonly_password }}"
     role_attr_flags: NOSUPERUSER,NOCREATEDB,NOCREATEROLE
   - name: postgres_exporter
-    password: "REDACTED"
+    password: "{{ vault_postgres_exporter_password }}"
     role_attr_flags: NOSUPERUSER,NOCREATEDB,NOCREATEROLE
 
 # Privileges
