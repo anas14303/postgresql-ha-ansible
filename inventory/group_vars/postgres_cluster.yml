@@ -25,16 +25,25 @@ patroni_install_from_pip: true
 # pg_hba managed by Patroni
 patroni_postgresql_pg_hba:
   - { type: "local", database: "all", user: "postgres", method: "peer" }
-  - { type: "host", database: "all", user: "all", address: "127.0.0.1/32", method: "scram-sha-256" }
-  - { type: "host", database: "all", user: "all", address: "::1/128", method: "scram-sha-256" }
-  - { type: "host", database: "replication", user: "replicator", address: "0.0.0.0/0", method: "scram-sha-256" }
-  - { type: "host", database: "keycloak", user: "keycloak", address: "192.168.163.132/32", method: "scram-sha-256" }
-  - { type: "host", database: "keycloak", user: "keycloak", address: "192.168.163.133/32", method: "scram-sha-256" }
+  - { type: "hostssl", database: "all", user: "all", address: "127.0.0.1/32", method: "scram-sha-256" }
+  - { type: "hostssl", database: "all", user: "all", address: "::1/128", method: "scram-sha-256" }
+  - { type: "hostssl", database: "replication", user: "replicator", address: "192.168.163.129/32", method: "scram-sha-256" }
+  - { type: "hostssl", database: "replication", user: "replicator", address: "192.168.163.128/32", method: "scram-sha-256" }
+  - { type: "hostssl", database: "postgres", user: "postgres", address: "192.168.163.129/32", method: "scram-sha-256" }
+  - { type: "hostssl", database: "postgres", user: "postgres", address: "192.168.163.128/32", method: "scram-sha-256" }
+  - { type: "hostssl", database: "keycloak", user: "keycloak", address: "192.168.163.132/32", method: "scram-sha-256" }
+  - { type: "hostssl", database: "keycloak", user: "keycloak", address: "192.168.163.133/32", method: "scram-sha-256" }
 
 # PostgreSQL parameters
 patroni_postgresql_parameters:
   - { option: "unix_socket_directories", value: "/var/run/postgresql" }
   - { option: "wal_log_hints", value: "on" }
+  - { option: "shared_preload_libraries", value: "pgaudit" }
+  - { option: "pgaudit.log", value: "write, ddl, role" }
+  - { option: "pgaudit.log_catalog", value: "off" }
+  - { option: "pgaudit.log_parameter", value: "on" }
+
+patroni_postgresql_listen: "127.0.0.1,192.168.163.129,192.168.163.128:{{ patroni_postgresql_port }}"
 
 # Watchdog required — verified working via promotion test 2026-07-09
 patroni_watchdog_mode: 'required'
