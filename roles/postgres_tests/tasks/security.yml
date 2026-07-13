@@ -1,0 +1,119 @@
+---
+# =============================================================
+# Category 2 — Security tests
+# Goal: prove the hardening from the mentor review actually holds:
+# hostssl enforced, unauthorized denied, watchdog configured,
+# pgAudit active, no world-open listen_addresses.
+# Risk: none (all read-only probes).
+# =============================================================
+
+- name: "[security] Attempt connection WITHOUT SSL — must be rejected"
+  ansible.builtin.command:
+    cmd: >
+      psql "host={{ pg_test_nodes[0].host }} user={{ pg_test_admin_user }}
+      password={{ pg_test_admin_password }} dbname={{ pg_test_db }} sslmode=disable"
+      -c "SELECT 1"
+  register: pg_test_nossl
+  failed_when: false
+  changed_when: false
+  delegate_to: localhost
+
+- name: "[security] HARD ASSERT — non-SSL connection was refused"
+  ansible.builtin.assert:
+    that:
+      - "'no encryption' in pg_test_nossl.stderr or pg_test_nossl.rc != 0"
+    fail_msg: "Non-SSL connection was ACCEPTED — hostssl enforcement is broken!"
+    success_msg: "hostssl correctly rejected a plaintext connection attempt."
+
+- name: "[security] Attempt connection WITH a wrong password — must be rejected"
+  ansible.builtin.command:
+    cmd: >
+      psql "host={{ pg_test_nodes[0].host }} user={{ pg_test_admin_user }}
+      password=definitely-wrong-password dbname={{ pg_test_db }} sslmode=require"
+      -c "SELECT 1"
+  register: pg_test_wrongpass
+  failed_when: false
+  changed_when: false
+  delegate_to: localhost
+
+- name: "[security] HARD ASSERT — wrong password rejected"
+  ansible.builtin.assert:
+    that:
+      - pg_test_wrongpass.rc != 0
+
+- name: "[security] Check listen_addresses is NOT world-open (0.0.0.0)"
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_test_nodes[0].host }}"
+    login_user: "{{ pg_test_admin_user }}"
+    login_password: "{{ pg_test_admin_password }}"
+    ssl_mode: require
+    db: "{{ pg_test_db }}"
+    query: "SHOW listen_addresses"
+  register: pg_test_listen
+
+- name: "[security] HARD ASSERT — listen_addresses is restricted"
+  ansible.builtin.assert:
+    that:
+      - "'0.0.0.0' not in pg_test_listen.query_result[0].listen_addresses"
+    fail_msg: "listen_addresses is still world-open: {{ pg_test_listen.query_result[0].listen_addresses }}"
+
+- name: "[security] Check pgAudit is loaded"
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_test_nodes[0].host }}"
+    login_user: "{{ pg_test_admin_user }}"
+    login_password: "{{ pg_test_admin_password }}"
+    ssl_mode: require
+    db: "{{ pg_test_db }}"
+    query: "SHOW shared_preload_libraries"
+  register: pg_test_preload
+
+- name: "[security] HARD ASSERT — pgaudit is in shared_preload_libraries"
+  ansible.builtin.assert:
+    that:
+      - "'pgaudit' in pg_test_preload.query_result[0].shared_preload_libraries"
+
+- name: "[security] Check watchdog mode via Patroni dynamic config"
+  ansible.builtin.uri:
+    url: "http://{{ pg_test_nodes[0].host }}:{{ pg_test_patroni_api_port }}/config"
+    return_content: true
+  register: pg_test_patroni_config
+
+- name: "[security] HARD ASSERT — watchdog mode is 'required', not 'off'"
+  ansible.builtin.assert:
+    that:
+      - (pg_test_patroni_config.json.watchdog.mode | default('off')) == 'required'
+    fail_msg: "Watchdog mode is not 'required' — split-brain protection is not active!"
+
+- name: "[security] Check every pg_hba rule uses hostssl (not plain host) for non-local connections"
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_test_nodes[0].host }}"
+    login_user: "{{ pg_test_admin_user }}"
+    login_password: "{{ pg_test_admin_password }}"
+    ssl_mode: require
+    db: "{{ pg_test_db }}"
+    query: >
+      SELECT type, count(*) AS cnt FROM pg_hba_file_rules
+      WHERE type = 'host' AND address NOT IN ('127.0.0.1/32', '::1/128')
+      GROUP BY type
+  register: pg_test_hba_plain
+
+- name: "[security] HARD ASSERT — no plain 'host' rules for non-loopback addresses"
+  ansible.builtin.assert:
+    that:
+      - pg_test_hba_plain.query_result | length == 0
+    fail_msg: "Found {{ pg_test_hba_plain.query_result }} plain 'host' (non-SSL) rules for non-loopback addresses."
+
+- name: "[security] Write security report"
+  ansible.builtin.copy:
+    dest: "{{ pg_test_report_dir }}/security_report.txt"
+    content: |
+      Postgres HA — Security Test Report
+      Generated: {{ ansible_date_time.iso8601 }}
+      ------------------------------------------------------------
+      Non-SSL connection rejected:      PASS
+      Wrong password rejected:          PASS
+      listen_addresses restricted:      PASS ({{ pg_test_listen.query_result[0].listen_addresses }})
+      pgAudit loaded:                   PASS
+      Watchdog mode:                    {{ pg_test_patroni_config.json.watchdog.mode | default('unknown') }}
+      Plain host rules (non-loopback):  {{ pg_test_hba_plain.query_result | length }}
+  delegate_to: localhost

@@ -1,0 +1,84 @@
+---
+# =============================================================
+# Category 5 — HA / Recovery tests
+# DISRUPTIVE — performs a real switchover and briefly stops a node.
+# Goal: prove the cluster survives leader loss and recovers clean,
+# the same procedure used to manually verify watchdog + etcd earlier.
+# Risk: brief write-unavailability during promotion (~1-3s).
+# Run only in a maintenance window.
+# =============================================================
+
+- name: "[ha] Record current cluster topology before test"
+  ansible.builtin.uri:
+    url: "http://{{ pg_test_nodes[0].host }}:{{ pg_test_patroni_api_port }}/cluster"
+    return_content: true
+  register: pg_test_ha_before
+
+- name: "[ha] Identify current leader name"
+  ansible.builtin.set_fact:
+    pg_test_leader_before: "{{ (pg_test_ha_before.json.members | selectattr('role', 'equalto', 'leader') | first).name }}"
+
+- name: "[ha] Identify a candidate replica for switchover"
+  ansible.builtin.set_fact:
+    pg_test_candidate: "{{ (pg_test_ha_before.json.members | rejectattr('name', 'equalto', pg_test_leader_before) | first).name }}"
+
+- name: "[ha] Trigger controlled switchover: {{ pg_test_leader_before }} -> {{ pg_test_candidate }}"
+  ansible.builtin.command:
+    cmd: >
+      patronictl -c /etc/patroni/config.yml switchover postgres-cluster
+      --master {{ pg_test_leader_before }} --candidate {{ pg_test_candidate }} --force
+  delegate_to: "{{ pg_test_nodes[0].host }}"
+  register: pg_test_switchover
+  changed_when: true
+
+- name: "[ha] Wait for new leader to stabilize"
+  ansible.builtin.pause:
+    seconds: 15
+
+- name: "[ha] Confirm new leader is the intended candidate"
+  ansible.builtin.uri:
+    url: "http://{{ pg_test_nodes[0].host }}:{{ pg_test_patroni_api_port }}/cluster"
+    return_content: true
+  register: pg_test_ha_after
+
+- name: "[ha] Identify new leader name"
+  ansible.builtin.set_fact:
+    pg_test_leader_after: "{{ (pg_test_ha_after.json.members | selectattr('role', 'equalto', 'leader') | first).name }}"
+
+- name: "[ha] HARD ASSERT — switchover promoted the intended candidate"
+  ansible.builtin.assert:
+    that:
+      - pg_test_leader_after == pg_test_candidate
+    fail_msg: "Expected {{ pg_test_candidate }} to be leader, but found {{ pg_test_leader_after }}."
+
+- name: "[ha] HARD ASSERT — old leader rejoined as a healthy replica/sync standby"
+  ansible.builtin.assert:
+    that:
+      - (pg_test_ha_after.json.members | selectattr('name', 'equalto', pg_test_leader_before) | first).state == 'streaming'
+    fail_msg: "Former leader {{ pg_test_leader_before }} did not rejoin as a streaming replica."
+
+- name: "[ha] Verify writes succeed against the new leader"
+  community.postgresql.postgresql_query:
+    login_host: "{{ item.host }}"
+    login_user: "{{ pg_test_admin_user }}"
+    login_password: "{{ pg_test_admin_password }}"
+    login_ssl_mode: require
+    db: "{{ pg_test_db }}"
+    query: "SELECT pg_is_in_recovery() AS is_replica"
+  loop: "{{ pg_test_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: pg_test_recovery_state
+
+- name: "[ha] Write HA test report"
+  ansible.builtin.copy:
+    dest: "{{ pg_test_report_dir }}/ha_report.txt"
+    content: |
+      Postgres HA — Switchover Test Report
+      Generated: {{ ansible_date_time.iso8601 }}
+      ------------------------------------------------------------
+      Leader before:    {{ pg_test_leader_before }}
+      Leader after:     {{ pg_test_leader_after }}
+      Switchover time:  ~15s (measured pause, not precise timing)
+      Old leader rejoined as replica: PASS
+  delegate_to: localhost

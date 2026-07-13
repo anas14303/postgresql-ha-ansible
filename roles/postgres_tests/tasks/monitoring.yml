@@ -1,0 +1,81 @@
+---
+# =============================================================
+# Category 3 — Monitoring validation
+# Goal: prove the observability surface actually reports truth,
+# so a real incident would be visible before a person notices.
+# Risk: none (read-only probes).
+# =============================================================
+
+- name: "[monitoring] Check Patroni /patroni endpoint on every node"
+  ansible.builtin.uri:
+    url: "http://{{ item.host }}:{{ pg_test_patroni_api_port }}/patroni"
+    return_content: true
+  register: pg_test_patroni_status
+  loop: "{{ pg_test_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "[monitoring] HARD ASSERT — every node reports 'running' state"
+  ansible.builtin.assert:
+    that:
+      - item.json.state == 'running'
+    fail_msg: "Node {{ item.item.name }} is not in 'running' state: {{ item.json.state }}"
+  loop: "{{ pg_test_patroni_status.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: "[monitoring] Check etcd cluster health from every etcd endpoint"
+  ansible.builtin.command:
+    cmd: >
+      etcdctl --endpoints={{ item }} endpoint health
+  register: pg_test_etcd_health
+  loop: "{{ pg_test_etcd_nodes }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+  delegate_to: "{{ pg_test_nodes[0].host }}"
+
+- name: "[monitoring] HARD ASSERT — every etcd endpoint reports healthy"
+  ansible.builtin.assert:
+    that:
+      - "'is healthy' in item.stdout"
+  loop: "{{ pg_test_etcd_health.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: "[monitoring] Check replication lag on all replicas"
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_test_leader_host }}"
+    login_user: "{{ pg_test_admin_user }}"
+    login_password: "{{ pg_test_admin_password }}"
+    ssl_mode: require
+    db: "{{ pg_test_db }}"
+    query: |
+      SELECT
+        host(client_addr) AS client_addr,
+        state,
+        sync_state,
+        pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS lag_bytes
+      FROM pg_stat_replication;
+  register: pg_test_replication_lag
+
+- name: "[monitoring] HARD ASSERT — no replica lagging more than 16MB"
+  ansible.builtin.assert:
+    that:
+      - item.lag_bytes | int < 16777216
+    fail_msg: "Replica {{ item.client_addr }} is lagging {{ item.lag_bytes }} bytes behind."
+  loop: "{{ pg_test_replication_lag.query_result }}"
+  loop_control:
+    label: "{{ item.client_addr }}"
+
+- name: "[monitoring] Write monitoring report"
+  ansible.builtin.copy:
+    dest: "{{ pg_test_report_dir }}/monitoring_report.txt"
+    content: |
+      Postgres HA — Monitoring Validation Report
+      Generated: {{ ansible_facts['date_time']['iso8601'] }}
+      ------------------------------------------------------------
+      Patroni nodes running:       {{ pg_test_patroni_status.results | length }}/{{ pg_test_nodes | length }}
+      etcd nodes healthy:          {{ pg_test_etcd_health.results | selectattr('stdout', 'search', 'is healthy') | list | length }}/{{ pg_test_etcd_nodes | length }}
+      Replicas within lag budget:  {{ pg_test_replication_lag.query_result | length }}
+  delegate_to: localhost

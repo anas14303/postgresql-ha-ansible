@@ -1,0 +1,89 @@
+---
+# =============================================================
+# Category 6 — etcd resilience test
+# DISRUPTIVE — stops one etcd node deliberately.
+# Goal: prove the 3-node Raft quorum tolerates losing exactly one
+# member with zero impact on the Postgres cluster (the exact test
+# performed manually against VM7 during the etcd migration).
+# Risk: none if quorum math is correct (2-of-3 survives); if it
+# doesn't, this is precisely the scenario you want caught in test,
+# not in production.
+# =============================================================
+
+- name: "[etcd_resilience] Record Postgres cluster state before etcd node stop"
+  ansible.builtin.uri:
+    url: "http://{{ pg_test_nodes[0].host }}:{{ pg_test_patroni_api_port }}/cluster"
+    return_content: true
+  register: pg_test_etcd_before
+
+- name: "[etcd_resilience] Pick the etcd node to stop (last in the list, treated as least critical)"
+  ansible.builtin.set_fact:
+    pg_test_etcd_target: "{{ pg_test_etcd_nodes[-1].split(':')[0] }}"
+
+- name: "[etcd_resilience] Stop etcd on {{ pg_test_etcd_target }}"
+  ansible.builtin.systemd:
+    name: etcd
+    state: stopped
+  delegate_to: "{{ pg_test_etcd_target }}"
+  become: true
+
+- name: "[etcd_resilience] Wait a moment for any transient effects"
+  ansible.builtin.pause:
+    seconds: 10
+
+- name: "[etcd_resilience] Check remaining etcd nodes still report healthy (2-of-3 quorum)"
+  ansible.builtin.command:
+    cmd: "etcdctl --endpoints={{ item }} endpoint health"
+  register: pg_test_etcd_remaining_health
+  loop: "{{ pg_test_etcd_nodes[:-1] }}"
+  delegate_to: "{{ pg_test_nodes[0].host }}"
+  changed_when: false
+
+- name: "[etcd_resilience] HARD ASSERT — remaining 2 etcd nodes are healthy"
+  ansible.builtin.assert:
+    that:
+      - "'is healthy' in item.stdout"
+  loop: "{{ pg_test_etcd_remaining_health.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: "[etcd_resilience] Confirm Postgres cluster is completely unaffected"
+  ansible.builtin.uri:
+    url: "http://{{ pg_test_nodes[0].host }}:{{ pg_test_patroni_api_port }}/cluster"
+    return_content: true
+  register: pg_test_etcd_during
+
+- name: "[etcd_resilience] HARD ASSERT — same leader, no role changes during etcd node loss"
+  ansible.builtin.assert:
+    that:
+      - (pg_test_etcd_during.json.members | selectattr('role', 'equalto', 'leader') | first).name ==
+        (pg_test_etcd_before.json.members | selectattr('role', 'equalto', 'leader') | first).name
+    fail_msg: "Leader changed after losing 1 etcd node — quorum tolerance is broken."
+    success_msg: "Postgres cluster fully unaffected by losing 1-of-3 etcd nodes."
+
+- name: "[etcd_resilience] Restore the stopped etcd node"
+  ansible.builtin.systemd:
+    name: etcd
+    state: started
+  delegate_to: "{{ pg_test_etcd_target }}"
+  become: true
+
+- name: "[etcd_resilience] Wait for rejoin"
+  ansible.builtin.pause:
+    seconds: 10
+
+- name: "[etcd_resilience] Confirm all 3 etcd nodes healthy again"
+  ansible.builtin.command:
+    cmd: "etcdctl --endpoints={{ item }} endpoint health"
+  register: pg_test_etcd_final_health
+  loop: "{{ pg_test_etcd_nodes }}"
+  delegate_to: "{{ pg_test_nodes[0].host }}"
+  changed_when: false
+
+- name: "[etcd_resilience] HARD ASSERT — full 3-node quorum restored"
+  ansible.builtin.assert:
+    that:
+      - "'is healthy' in item.stdout"
+  loop: "{{ pg_test_etcd_final_health.results }}"
+  loop_control:
+    label: "{{ item.item }}"

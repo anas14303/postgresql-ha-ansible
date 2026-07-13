@@ -1,0 +1,26 @@
+---
+# =============================================================
+# Postgres HA — Test Suite Playbook
+# Deploys nothing. Only queries and probes the live cluster.
+# Run selectively with --tags, override flags with -e.
+#
+# Examples:
+#   Safe suite only (default):
+#     ansible-playbook tests.yml --ask-vault-pass
+#
+#   Just functional + security:
+#     ansible-playbook tests.yml --tags functional,security --ask-vault-pass
+#
+#   Include a controlled switchover (maintenance window only):
+#     ansible-playbook tests.yml --tags ha -e pg_test_ha=true --ask-vault-pass
+#
+#   Include etcd node-loss resilience test:
+#     ansible-playbook tests.yml --tags etcd_resilience -e pg_test_etcd_resilience=true --ask-vault-pass
+# =============================================================
+
+- name: Postgres HA Test Suite
+  hosts: vm1
+  become: false
+  gather_facts: true
+  roles:
+    - postgres_tests

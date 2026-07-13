@@ -1,0 +1,116 @@
+---
+# =============================================================
+# Postgres HA Test Suite — dispatcher
+# Include each category task file, gated by its flag.
+# Run selectively with --tags, or all with no tags.
+# =============================================================
+
+- name: Ensure report directory exists
+  ansible.builtin.file:
+    path: "{{ pg_test_report_dir }}"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - always
+
+- name: Determine current cluster leader
+  ansible.builtin.uri:
+    url: "http://{{ pg_test_nodes[0].host }}:{{ pg_test_patroni_api_port }}/cluster"
+    return_content: true
+  register: pg_test_cluster_topology
+  tags:
+    - always
+
+- name: Set leader host fact for all subsequent tests
+  ansible.builtin.set_fact:
+    pg_test_leader_host: >-
+      {{ (pg_test_nodes
+          | selectattr('name', 'equalto',
+              (pg_test_cluster_topology.json.members
+               | selectattr('role', 'equalto', 'leader')
+               | first).name)
+          | first).host }}
+  tags:
+    - always
+
+- name: Functional tests
+  ansible.builtin.include_tasks:
+    file: functional.yml
+    apply:
+      tags:
+        - functional
+  when: pg_test_functional | bool
+  tags:
+    - functional
+
+- name: Security tests
+  ansible.builtin.include_tasks:
+    file: security.yml
+    apply:
+      tags:
+        - security
+  when: pg_test_security | bool
+  tags:
+    - security
+
+- name: Monitoring validation
+  ansible.builtin.include_tasks:
+    file: monitoring.yml
+    apply:
+      tags:
+        - monitoring
+  when: pg_test_monitoring | bool
+  tags:
+    - monitoring
+
+- name: Load tests (pgbench + k6)
+  ansible.builtin.include_tasks:
+    file: load.yml
+    apply:
+      tags:
+        - load
+  when: pg_test_load | bool
+  tags:
+    - load
+
+- name: HA / recovery tests (DISRUPTIVE)
+  ansible.builtin.include_tasks:
+    file: ha.yml
+    apply:
+      tags:
+        - ha
+  when: pg_test_ha | bool
+  tags:
+    - ha
+
+- name: etcd resilience tests (DISRUPTIVE)
+  ansible.builtin.include_tasks:
+    file: etcd_resilience.yml
+    apply:
+      tags:
+        - etcd_resilience
+  when: pg_test_etcd_resilience | bool
+  tags:
+    - etcd_resilience
+
+- name: Watchdog trigger test (DISRUPTIVE)
+  ansible.builtin.include_tasks:
+    file: watchdog.yml
+    apply:
+      tags:
+        - watchdog
+  when: pg_test_watchdog | bool
+  tags:
+    - watchdog
+
+- name: Disaster recovery test (DESTRUCTIVE)
+  ansible.builtin.include_tasks:
+    file: disaster_recovery.yml
+    apply:
+      tags:
+        - dr
+  when: pg_test_dr | bool
+  tags:
+    - dr

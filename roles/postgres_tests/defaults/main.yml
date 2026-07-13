@@ -1,0 +1,53 @@
+---
+# =============================================================
+# Postgres HA Test Suite — enable flags
+# Mirrors the Nexus test suite pattern: each category has its
+# own flag + tag, safe ones ON by default, disruptive ones OFF.
+# =============================================================
+
+# --- Cluster connection info ---
+pg_test_vip: "192.168.163.100"          # not used yet (no pg VIP), kept for future haproxy pg passthrough
+pg_test_nodes:
+  - { name: vm1, host: "192.168.163.129" }
+  - { name: vm2, host: "192.168.163.128" }
+pg_test_etcd_nodes:
+  - "192.168.163.129:2379"
+  - "192.168.163.128:2379"
+  - "192.168.163.134:2379"
+pg_test_patroni_api_port: 8008
+pg_test_pg_port: 5432
+
+pg_test_db: postgres
+pg_test_admin_user: postgres
+pg_test_admin_password: "{{ vault_patroni_superuser_password }}"
+
+pg_test_app_db: appdb_crm
+pg_test_app_user: app_readwrite
+pg_test_app_password: "{{ vault_app_readwrite_password }}"
+
+# --- Category enable flags (safe ones ON, disruptive OFF) ---
+pg_test_functional: true
+pg_test_security: true
+pg_test_monitoring: true
+pg_test_load: true
+pg_test_load_k6: true
+
+pg_test_ha: false              # DISRUPTIVE — kills/restarts Postgres + Patroni
+pg_test_etcd_resilience: false # DISRUPTIVE — stops etcd nodes
+pg_test_watchdog: false        # DISRUPTIVE — forces a real watchdog trigger
+pg_test_dr: false               # DESTRUCTIVE — wipes data dir, restores from backup
+
+# --- Load test tuning ---
+pg_test_pgbench_clients: 10
+pg_test_pgbench_threads: 4
+pg_test_pgbench_duration: 30    # seconds
+pg_test_k6_vus: 20
+pg_test_k6_duration: "30s"
+
+# --- Thresholds ---
+pg_test_pgbench_min_tps: 50           # fail if TPS falls below this on your hardware
+pg_test_k6_p95_ms: 500
+pg_test_k6_error_rate: 0.05
+
+# --- Report output ---
+pg_test_report_dir: "{{ lookup('env','HOME') }}/pg_test_reports"

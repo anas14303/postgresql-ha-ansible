@@ -1,0 +1,135 @@
+---
+# =============================================================
+# Category 4 — Load tests
+# Goal: measure real throughput/latency under load.
+# k6 doesn't speak raw Postgres wire protocol (OSS build), so:
+#   - pgbench drives actual database load (the real number that matters)
+#   - k6 drives the HTTP-facing surface: Patroni REST API + HAProxy/Keycloak
+# Risk: low — bounded VUs/duration, no data mutation beyond pgbench's
+# own scratch tables (dropped after).
+# =============================================================
+
+- name: Debug leader host
+  ansible.builtin.debug:
+    var: pg_test_leader_host
+
+- name: "[load] Ensure pgbench is installed"
+  ansible.builtin.apt:
+    name: postgresql-contrib
+    state: present
+    update_cache: true
+  become: true
+  delegate_to: vm2
+
+- name: "[load] Initialize pgbench scratch schema"
+  ansible.builtin.command:
+    cmd: >
+      pgbench -i -s 10
+      "host={{ pg_test_leader_host }} user={{ pg_test_admin_user }}
+      password={{ pg_test_admin_password }} dbname={{ pg_test_db }} sslmode=require"
+  delegate_to: "{{ pg_test_leader_host }}"
+  changed_when: true
+
+- name: "[load] Run pgbench against the Leader"
+  ansible.builtin.command:
+    cmd: >
+      pgbench -c {{ pg_test_pgbench_clients }} -j {{ pg_test_pgbench_threads }}
+      -T {{ pg_test_pgbench_duration }} --progress=5
+      "host={{ pg_test_leader_host }} user={{ pg_test_admin_user }}
+      password={{ pg_test_admin_password }} dbname={{ pg_test_db }} sslmode=require"
+  register: pg_test_pgbench_result
+  delegate_to: "{{ pg_test_leader_host }}"
+  changed_when: false
+
+- name: "[load] Extract TPS from pgbench output"
+  ansible.builtin.set_fact:
+    pg_test_tps: "{{ pg_test_pgbench_result.stdout | regex_search('tps = ([0-9.]+)', '\\1') | first | float }}"
+
+- name: "[load] HARD ASSERT — TPS meets minimum threshold"
+  ansible.builtin.assert:
+    that:
+      - pg_test_tps | float >= pg_test_pgbench_min_tps | float
+    fail_msg: "TPS {{ pg_test_tps }} is below the minimum threshold of {{ pg_test_pgbench_min_tps }}."
+    success_msg: "pgbench TPS: {{ pg_test_tps }} (threshold {{ pg_test_pgbench_min_tps }})"
+
+- name: "[load] Clean up pgbench scratch tables"
+  ansible.builtin.command:
+    cmd: >
+      psql "host={{ pg_test_leader_host }} user={{ pg_test_admin_user }}
+      password={{ pg_test_admin_password }} dbname={{ pg_test_db }} sslmode=require"
+      -c "DROP TABLE IF EXISTS pgbench_accounts, pgbench_branches, pgbench_history, pgbench_tellers"
+  delegate_to: "{{ pg_test_leader_host }}"
+  changed_when: true
+
+# --- k6 against the HTTP-facing layer ---
+
+- name: "[load_k6] Ensure k6 is installed"
+  ansible.builtin.stat:
+    path: /usr/local/bin/k6
+  register: pg_test_k6_bin
+  delegate_to: localhost
+
+- name: "[load_k6] Copy k6 script to control node's home dir"
+  ansible.builtin.copy:
+    src: k6_patroni_api_test.js
+    dest: "{{ lookup('env','HOME') }}/k6_patroni_api_test.js"
+    mode: '0644'
+  delegate_to: localhost
+  when: pg_test_load_k6 | bool
+
+- name: "[load_k6] Run k6 against Patroni REST API"
+  ansible.builtin.command:
+    cmd: >
+      k6 run --vus {{ pg_test_k6_vus }} --duration {{ pg_test_k6_duration }}
+      -e PATRONI_HOST={{ pg_test_leader_host }}
+      -e PATRONI_PORT={{ pg_test_patroni_api_port }}
+      --summary-export={{ lookup('env','HOME') }}/k6_summary.json
+      {{ lookup('env','HOME') }}/k6_patroni_api_test.js
+
+  register: pg_test_k6_result
+  delegate_to: localhost
+  when: pg_test_load_k6 | bool
+  changed_when: false
+
+- name: "[load_k6] Read k6 summary JSON"
+  ansible.builtin.slurp:
+    path: "{{ lookup('env','HOME') }}/k6_summary.json"
+  register: pg_test_k6_summary_raw
+  delegate_to: localhost
+  when: pg_test_load_k6 | bool
+
+- name: "[load_k6] Parse k6 summary"
+  ansible.builtin.set_fact:
+    pg_test_k6_summary: "{{ pg_test_k6_summary_raw.content | b64decode | from_json }}"
+  when: pg_test_load_k6 | bool
+
+- name: "[load_k6] Set threshold check facts"
+  ansible.builtin.set_fact:
+    pg_test_k6_p95_key: "p(95)<{{ pg_test_k6_p95_ms }}"
+    pg_test_k6_err_key: "rate<{{ pg_test_k6_error_rate }}"
+  when: pg_test_load_k6 | bool
+
+- name: "[load_k6] HARD ASSERT — k6 thresholds passed (p95 latency, error rate)"
+  ansible.builtin.assert:
+    that:
+      - pg_test_k6_summary.metrics.http_req_duration.thresholds[pg_test_k6_p95_key] == false
+      - pg_test_k6_summary.metrics.errors.thresholds[pg_test_k6_err_key] == false
+    fail_msg: "k6 thresholds breached — check {{ ansible_env.HOME | default(lookup('env','HOME')) }}/k6_summary.json for details."
+    success_msg: "k6 thresholds passed: p95={{ pg_test_k6_summary.metrics.http_req_duration['p(95)'] }}ms, errors OK"
+  when: pg_test_load_k6 | bool
+
+- name: "[load] Write load test report"
+  ansible.builtin.copy:
+    dest: "{{ pg_test_report_dir }}/load_report.txt"
+    content: |
+      Postgres HA — Load Test Report
+      Generated: {{ ansible_date_time.iso8601 }}
+      ------------------------------------------------------------
+      pgbench clients:       {{ pg_test_pgbench_clients }}
+      pgbench duration:      {{ pg_test_pgbench_duration }}s
+      pgbench TPS:           {{ pg_test_tps }}
+      TPS threshold:         {{ pg_test_pgbench_min_tps }}
+      k6 VUs:                {{ pg_test_k6_vus }}
+      k6 duration:           {{ pg_test_k6_duration }}
+      k6 summary file:       {{ pg_test_report_dir }}/k6_summary.json
+  delegate_to: localhost

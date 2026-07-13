@@ -1,0 +1,36 @@
+---
+# =============================================================
+# Category 8 — Disaster Recovery test
+# DESTRUCTIVE — wipes a node's data directory and restores from backup.
+# STATUS: SCAFFOLD ONLY. This cannot run yet because backups
+# (pgBackRest / WAL archiving) are not deployed — see project
+# checklist item "Backups (PostgreSQL + Vault)" still marked Later.
+#
+# Intended flow once backups exist (mirrors the Nexus DR test structure):
+#   1. Insert a unique marker row + note its value
+#   2. Take a fresh backup (pgbackrest --stanza=postgres-cluster backup)
+#   3. Stop Postgres on a REPLICA node, wipe its data directory
+#   4. Run patronictl reinit (or pgbackrest restore) to rebuild it
+#   5. Confirm marker row is present after recovery — proves the
+#      backup+restore path genuinely works, not just that it runs
+#
+# DO NOT enable pg_test_dr until pgBackRest is deployed and this
+# task file has been rewritten against the real restore command.
+# =============================================================
+
+- name: "[dr] Refuse to run until backup tooling is confirmed present"
+  ansible.builtin.command:
+    cmd: which pgbackrest
+  register: pg_test_dr_backup_tool
+  delegate_to: "{{ pg_test_nodes[0].host }}"
+  failed_when: false
+  changed_when: false
+
+- name: "[dr] HARD STOP — backup tooling not found"
+  ansible.builtin.fail:
+    msg: >
+      pgBackRest not found on {{ pg_test_nodes[0].host }}. This test category
+      is a scaffold and cannot run until backup tooling is deployed. Deploy
+      pgBackRest first, then replace this guard with the real restore steps
+      described in the comment block above.
+  when: pg_test_dr_backup_tool.rc != 0

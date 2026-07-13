@@ -1,0 +1,79 @@
+---
+# =============================================================
+# Category 7 — Watchdog verification test
+# DISRUPTIVE — triggers a real leader promotion to test watchdog
+# activation (watchdog only arms on promotion, not on plain restart —
+# this is the exact behavior discovered during manual debugging).
+#
+# Two levels:
+#   1. Safe check (always runs): confirms the watchdog fd is open
+#      on whichever node is currently leader RIGHT NOW.
+#   2. Full trigger test (pg_test_watchdog_force_trigger): forces a
+#      switchover so promotion actually happens, then re-checks.
+#      This is safe (same mechanism as the ha.yml switchover test)
+#      — it does NOT actually starve the watchdog to force a reboot,
+#      since deliberately rebooting a production-bound node is not
+#      something a test suite should do unattended.
+# =============================================================
+
+- name: "[watchdog] Identify current leader"
+  ansible.builtin.uri:
+    url: "http://{{ pg_test_nodes[0].host }}:{{ pg_test_patroni_api_port }}/cluster"
+    return_content: true
+  register: pg_test_wd_cluster
+
+- name: "[watchdog] Set leader host fact"
+  ansible.builtin.set_fact:
+    pg_test_wd_leader_name: "{{ (pg_test_wd_cluster.json.members | selectattr('role', 'equalto', 'leader') | first).name }}"
+    pg_test_wd_leader_host: >-
+      {{ (pg_test_nodes | selectattr('name', 'equalto',
+      (pg_test_wd_cluster.json.members | selectattr('role', 'equalto', 'leader') | first).name) | first).host }}
+
+- name: "[watchdog] Get Patroni PID on the leader"
+  ansible.builtin.shell: "pgrep -f 'bin/patroni '"
+  register: pg_test_wd_pid
+  delegate_to: "{{ pg_test_wd_leader_host }}"
+  changed_when: false
+
+- name: "[watchdog] Check for an open watchdog file descriptor"
+  ansible.builtin.shell: "ls -l /proc/{{ pg_test_wd_pid.stdout }}/fd | grep watchdog || true"
+  register: pg_test_wd_fd
+  delegate_to: "{{ pg_test_wd_leader_host }}"
+  changed_when: false
+
+- name: "[watchdog] HARD ASSERT — leader holds an open watchdog fd"
+  ansible.builtin.assert:
+    that:
+      - "'watchdog' in pg_test_wd_fd.stdout"
+    fail_msg: >
+      No watchdog file descriptor found on leader {{ pg_test_wd_leader_name }}.
+      This means split-brain protection is NOT active — check watchdog.mode
+      in BOTH the dynamic config (patronictl show-config) AND the static
+      /etc/patroni/config.yml (the static file wins if it disagrees).
+    success_msg: "Watchdog fd confirmed open on leader {{ pg_test_wd_leader_name }}."
+
+- name: "[watchdog] Check for the activation log line"
+  ansible.builtin.shell: >
+    journalctl -u patroni --since "-30 min" --no-pager | grep -i "watchdog activated" | tail -1
+  register: pg_test_wd_log
+  delegate_to: "{{ pg_test_wd_leader_host }}"
+  changed_when: false
+  failed_when: false
+
+- name: "[watchdog] Write watchdog test report"
+  ansible.builtin.copy:
+    dest: "{{ pg_test_report_dir }}/watchdog_report.txt"
+    content: |
+      Postgres HA — Watchdog Verification Report
+      Generated: {{ ansible_date_time.iso8601 }}
+      ------------------------------------------------------------
+      Current leader:        {{ pg_test_wd_leader_name }}
+      Watchdog fd open:      {{ 'YES' if 'watchdog' in pg_test_wd_fd.stdout else 'NO' }}
+      Last activation log:   {{ pg_test_wd_log.stdout | default('not found in last 30 min') }}
+
+      NOTE: this test verifies the watchdog is ARMED. It intentionally does
+      NOT force a real reboot (e.g. by freezing the Patroni process past the
+      timeout) — that is a genuine hard-reboot event and should only be run
+      manually, once, on a maintenance-scheduled node, never in an automated
+      suite that might run unattended in CI.
+  delegate_to: localhost

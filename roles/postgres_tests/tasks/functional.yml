@@ -1,0 +1,102 @@
+---
+# =============================================================
+# Category 1 — Functional tests
+# Goal: prove the cluster is up, reachable, and does basic work.
+# Risk: none (read-only + throwaway test table, dropped after).
+# =============================================================
+
+- name: "[functional] Check Patroni REST API is reachable on every node"
+  ansible.builtin.uri:
+    url: "http://{{ item.host }}:{{ pg_test_patroni_api_port }}/health"
+    status_code: [200, 503]   # 503 valid too — replica reports 503 on /health by design in some versions
+    return_content: true
+  register: pg_test_health
+  loop: "{{ pg_test_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "[functional] Assert exactly one Leader exists in the cluster"
+  ansible.builtin.uri:
+    url: "http://{{ item.host }}:{{ pg_test_patroni_api_port }}/leader"
+    status_code: [200, 503]
+    return_content: true
+  register: pg_test_leader_check
+  loop: "{{ pg_test_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  failed_when: false
+
+- name: "[functional] Count how many nodes report as Leader"
+  ansible.builtin.set_fact:
+    pg_test_leader_count: "{{ pg_test_leader_check.results | selectattr('status', 'equalto', 200) | list | length }}"
+
+- name: "[functional] HARD ASSERT — exactly one leader"
+  ansible.builtin.assert:
+    that:
+      - pg_test_leader_count | int == 1
+    fail_msg: "Expected exactly 1 leader, found {{ pg_test_leader_count }}. Possible split-brain or full outage."
+    success_msg: "Exactly one leader confirmed — no split-brain."
+
+- name: "[functional] Connect to Postgres and run SELECT 1"
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_test_leader_host }}"
+    login_user: "{{ pg_test_admin_user }}"
+    login_password: "{{ pg_test_admin_password }}"
+    db: "{{ pg_test_db }}"
+    query: "SELECT 1 AS ok"
+  register: pg_test_select1
+
+- name: "[functional] HARD ASSERT — SELECT 1 returns 1"
+  ansible.builtin.assert:
+    that:
+      - pg_test_select1.query_result[0].ok == 1
+
+- name: "[functional] Create throwaway test table"
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_test_leader_host }}"
+    login_user: "{{ pg_test_admin_user }}"
+    login_password: "{{ pg_test_admin_password }}"
+    db: "{{ pg_test_db }}"
+    query: "CREATE TABLE IF NOT EXISTS pg_test_marker (id serial PRIMARY KEY, created_at timestamptz DEFAULT now())"
+
+- name: "[functional] Insert a marker row"
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_test_leader_host }}"
+    login_user: "{{ pg_test_admin_user }}"
+    login_password: "{{ pg_test_admin_password }}"
+    db: "{{ pg_test_db }}"
+    query: "INSERT INTO pg_test_marker DEFAULT VALUES RETURNING id"
+  register: pg_test_marker_insert
+
+- name: "[functional] Wait for replication to catch up (max 10s)"
+  ansible.builtin.pause:
+    seconds: 3
+
+- name: "[functional] Confirm marker row is visible on the replica (proves streaming replication works)"
+  community.postgresql.postgresql_query:
+    login_host: "{{ item.host }}"
+    login_user: "{{ pg_test_admin_user }}"
+    login_password: "{{ pg_test_admin_password }}"
+    db: "{{ pg_test_db }}"
+    query: "SELECT id FROM pg_test_marker WHERE id = {{ pg_test_marker_insert.query_result[0].id }}"
+  register: pg_test_replica_check
+  loop: "{{ pg_test_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "[functional] HARD ASSERT — marker row present on all nodes"
+  ansible.builtin.assert:
+    that:
+      - item.query_result | length == 1
+    fail_msg: "Marker row missing on {{ item.item.name }} — replication may be broken or lagging beyond 3s."
+  loop: "{{ pg_test_replica_check.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: "[functional] Clean up test table"
+  community.postgresql.postgresql_query:
+    login_host: "{{ pg_test_leader_host }}"
+    login_user: "{{ pg_test_admin_user }}"
+    login_password: "{{ pg_test_admin_password }}"
+    db: "{{ pg_test_db }}"
+    query: "DROP TABLE IF EXISTS pg_test_marker"
