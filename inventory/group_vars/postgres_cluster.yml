@@ -6,7 +6,9 @@ patroni_namespace: /service/
 
 # DCS: etcd
 patroni_dcs: etcd
-patroni_etcd_hosts: "192.168.163.129:2379,192.168.163.128:2379,192.168.163.134:2379"
+# Port must match etcd_client_port in roles/etcd/defaults/main.yml — kept literal here
+# since role defaults aren't visible outside that role's own task execution.
+patroni_etcd_hosts: "{% for host in groups['etcd'] %}{{ hostvars[host].ansible_host }}:2379{% if not loop.last %},{% endif %}{% endfor %}"
 
 # PostgreSQL version
 patroni_postgresql_version: 16
@@ -33,6 +35,8 @@ patroni_postgresql_pg_hba:
   - { type: "hostssl", database: "postgres", user: "postgres", address: "192.168.163.128/32", method: "scram-sha-256" }
   - { type: "hostssl", database: "keycloak", user: "keycloak", address: "192.168.163.132/32", method: "scram-sha-256" }
   - { type: "hostssl", database: "keycloak", user: "keycloak", address: "192.168.163.133/32", method: "scram-sha-256" }
+  - { type: "hostssl", database: "replication", user: "replicator", address: "192.168.163.134/32", method: "scram-sha-256" }
+  - { type: "hostssl", database: "postgres", user: "postgres", address: "192.168.163.134/32", method: "scram-sha-256" }
 
 # PostgreSQL parameters
 patroni_postgresql_parameters:
@@ -43,7 +47,7 @@ patroni_postgresql_parameters:
   - { option: "pgaudit.log_catalog", value: "off" }
   - { option: "pgaudit.log_parameter", value: "on" }
 
-patroni_postgresql_listen: "127.0.0.1,192.168.163.129,192.168.163.128:{{ patroni_postgresql_port }}"
+patroni_postgresql_listen: "127.0.0.1,192.168.163.129,192.168.163.128,192.168.163.134:{{ patroni_postgresql_port }}"
 
 # Watchdog required — verified working via promotion test 2026-07-09
 patroni_watchdog_mode: 'required'
