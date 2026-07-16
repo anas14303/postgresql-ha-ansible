@@ -12,7 +12,7 @@ postgresql_service_state: started
 
 # Network
 postgresql_port: 5432
-postgresql_listen_addresses: '*'
+postgresql_listen_addresses: '127.0.0.1,192.168.163.129,192.168.163.128,192.168.163.134'
 
 # Security
 postgresql_auth_method: scram-sha-256
@@ -73,17 +73,15 @@ postgresql_backup_mail_addr: ""
 node_exporter_enabled_collectors:
   - systemd
 
-postgres_exporter_env:
-  DATA_SOURCE_NAME: "postgresql://postgres_exporter:REDACTED@localhost:5432/postgres?sslmode=disable"
-
-postgres_exporter_user: postgres_exporter
-postgres_exporter_password: "NEW_VALUE_3"
-
+postgres_exporter_username: postgres_exporter
+postgres_exporter_password: "{{ vault_postgres_exporter_password }}"
+postgres_exporter_name: "postgresql://{{ postgres_exporter_username }}:{{ postgres_exporter_password | urlencode | replace('%', '%%') }}@127.0.0.1:5432/postgres?sslmode=require"
 prometheus_targets:
   node:
     - targets:
         - "192.168.163.129:9100"
         - "192.168.163.128:9100"
+        - "192.168.163.134:9100"
       labels:
         env: lab
 
@@ -97,6 +95,7 @@ prometheus_scrape_configs:
       - targets:
           - "192.168.163.129:9187"
           - "192.168.163.128:9187"
+          - "192.168.163.134:9187"
         labels:
           env: lab
   - job_name: "patroni"
@@ -105,6 +104,7 @@ prometheus_scrape_configs:
       - targets:
           - "192.168.163.129:8008"
           - "192.168.163.128:8008"
+          - "192.168.163.134:8008"
         labels:
           env: lab
 
