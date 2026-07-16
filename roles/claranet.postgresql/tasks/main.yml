@@ -98,7 +98,6 @@
   when:
     - not _postgresql_end_role
     - postgresql_manage_objects
-    - not (postgresql_replication or postgresql_is_patroni) or postgresql_replication_role == "primary"
   tags:
     - user
     - users
@@ -118,7 +117,6 @@
   when:
     - not _postgresql_end_role
     - postgresql_manage_objects
-    - not (postgresql_replication or postgresql_is_patroni) or postgresql_replication_role == "primary"
   tags:
     - db
     - database
@@ -129,7 +127,6 @@
   when:
     - not _postgresql_end_role
     - postgresql_manage_objects
-    - not (postgresql_replication or postgresql_is_patroni) or postgresql_replication_role == "primary"
   tags:
     - owner
     - owners
@@ -143,7 +140,6 @@
   when:
     - not _postgresql_end_role
     - postgresql_manage_objects
-    - not (postgresql_replication or postgresql_is_patroni) or postgresql_replication_role == "primary"
   tags:
     - ext
     - extension
@@ -154,7 +150,6 @@
   when:
     - not _postgresql_end_role
     - postgresql_manage_objects
-    - not (postgresql_replication or postgresql_is_patroni) or postgresql_replication_role == "primary"
   tags:
     - query
     - script
