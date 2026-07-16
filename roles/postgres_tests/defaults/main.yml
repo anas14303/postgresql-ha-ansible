@@ -10,6 +10,7 @@ pg_test_vip: "192.168.163.100"          # not used yet (no pg VIP), kept for fut
 pg_test_nodes:
   - { name: vm1, host: "192.168.163.129" }
   - { name: vm2, host: "192.168.163.128" }
+  - { name: vm7, host: "192.168.163.134" }
 pg_test_etcd_nodes:
   - "192.168.163.129:2379"
   - "192.168.163.128:2379"
@@ -51,3 +52,11 @@ pg_test_k6_error_rate: 0.05
 
 # --- Report output ---
 pg_test_report_dir: "{{ lookup('env','HOME') }}/pg_test_reports"
+
+# --- Disaster recovery test settings ---
+pg_test_backup_repo_host: "{{ hostvars[groups['backup_repo'][0]]['ansible_host'] }}"
+pg_test_backup_repo_user: pgbackrest
+pg_test_backup_stanza: postgres-cluster
+pg_test_dr_target_host: "{{ pg_test_nodes[0].host }}"   # node to run the scratch restore on
+pg_test_dr_scratch_path: "/tmp/pg_test_dr_restore"
+pg_test_dr_scratch_port: 5555

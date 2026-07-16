@@ -1,36 +1,153 @@
 ---
 # =============================================================
 # Category 8 — Disaster Recovery test
-# DESTRUCTIVE — wipes a node's data directory and restores from backup.
-# STATUS: SCAFFOLD ONLY. This cannot run yet because backups
-# (pgBackRest / WAL archiving) are not deployed — see project
-# checklist item "Backups (PostgreSQL + Vault)" still marked Later.
-#
-# Intended flow once backups exist (mirrors the Nexus DR test structure):
-#   1. Insert a unique marker row + note its value
-#   2. Take a fresh backup (pgbackrest --stanza=postgres-cluster backup)
-#   3. Stop Postgres on a REPLICA node, wipe its data directory
-#   4. Run patronictl reinit (or pgbackrest restore) to rebuild it
-#   5. Confirm marker row is present after recovery — proves the
-#      backup+restore path genuinely works, not just that it runs
-#
-# DO NOT enable pg_test_dr until pgBackRest is deployed and this
-# task file has been rewritten against the real restore command.
+# Restores the latest pgBackRest backup to a scratch directory,
+# boots a throwaway Postgres instance on an alternate port, and
+# confirms a marker row written before the backup survives the
+# restore. Nothing in the live cluster is touched or restarted.
 # =============================================================
 
-- name: "[dr] Refuse to run until backup tooling is confirmed present"
-  ansible.builtin.command:
-    cmd: which pgbackrest
-  register: pg_test_dr_backup_tool
-  delegate_to: "{{ pg_test_nodes[0].host }}"
+- name: "[dr] Determine current Patroni leader"
+  ansible.builtin.uri:
+    url: "http://{{ item.host }}:{{ pg_test_patroni_api_port }}/master"
+    status_code: [200, 503]
+  register: pg_test_dr_leader_check
   failed_when: false
   changed_when: false
+  loop: "{{ pg_test_nodes }}"
+  delegate_to: localhost
 
-- name: "[dr] HARD STOP — backup tooling not found"
-  ansible.builtin.fail:
-    msg: >
-      pgBackRest not found on {{ pg_test_nodes[0].host }}. This test category
-      is a scaffold and cannot run until backup tooling is deployed. Deploy
-      pgBackRest first, then replace this guard with the real restore steps
-      described in the comment block above.
-  when: pg_test_dr_backup_tool.rc != 0
+- name: "[dr] Set fact - leader node"
+  ansible.builtin.set_fact:
+    pg_test_dr_leader: "{{ (pg_test_dr_leader_check.results | selectattr('status', 'equalto', 200) | first).item }}"
+
+- name: "[dr] Create marker table if not exists"
+  community.postgresql.postgresql_query:
+    login_user: "{{ pg_test_admin_user }}"
+    db: "{{ pg_test_db }}"
+    query: "CREATE TABLE IF NOT EXISTS pg_test_dr_marker (id serial PRIMARY KEY, marker text, created_at timestamptz DEFAULT now())"
+  become: true
+  become_user: postgres
+  delegate_to: "{{ pg_test_dr_leader.host }}"
+
+- name: "[dr] Insert unique marker row"
+  ansible.builtin.set_fact:
+    pg_test_dr_marker_value: "dr-test-{{ ansible_date_time.iso8601 }}"
+
+- name: "[dr] Write marker row on leader"
+  community.postgresql.postgresql_query:
+    login_user: "{{ pg_test_admin_user }}"
+    db: "{{ pg_test_db }}"
+    query: "INSERT INTO pg_test_dr_marker (marker) VALUES (%s)"
+    positional_args:
+      - "{{ pg_test_dr_marker_value }}"
+  become: true
+  become_user: postgres
+  delegate_to: "{{ pg_test_dr_leader.host }}"
+
+- name: "[dr] Take fresh full backup on repo host"
+  ansible.builtin.command:
+    cmd: "pgbackrest --stanza={{ pg_test_backup_stanza }} --type=full backup"
+  become: true
+  become_user: "{{ pg_test_backup_repo_user }}"
+  delegate_to: "{{ pg_test_backup_repo_host }}"
+  changed_when: true
+
+- name: "[dr] Ensure scratch restore directory exists on test node"
+  ansible.builtin.file:
+    path: "{{ pg_test_dr_scratch_path }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+  become: true
+  delegate_to: "{{ pg_test_dr_target_host }}"
+
+- name: "[dr] Restore latest backup to scratch directory"
+  ansible.builtin.command:
+    cmd: >
+      pgbackrest --stanza={{ pg_test_backup_stanza }}
+      --pg1-path={{ pg_test_dr_scratch_path }}
+      --repo1-host={{ pg_test_backup_repo_host }}
+      --repo1-host-user={{ pg_test_backup_repo_user }}
+      restore
+  become: true
+  become_user: postgres
+  delegate_to: "{{ pg_test_dr_target_host }}"
+  changed_when: true
+
+- name: "[dr] Restore config files from pgBackRest .backup copies"
+  ansible.builtin.shell: |
+    cp {{ pg_test_dr_scratch_path }}/postgresql.conf.backup {{ pg_test_dr_scratch_path }}/postgresql.conf
+    cp {{ pg_test_dr_scratch_path }}/postgresql.base.conf.backup {{ pg_test_dr_scratch_path }}/postgresql.base.conf
+    cp {{ pg_test_dr_scratch_path }}/pg_hba.conf.backup {{ pg_test_dr_scratch_path }}/pg_hba.conf
+    cp {{ pg_test_dr_scratch_path }}/pg_ident.conf.backup {{ pg_test_dr_scratch_path }}/pg_ident.conf
+    mkdir -p {{ pg_test_dr_scratch_path }}/conf.d
+  become: true
+  become_user: postgres
+  delegate_to: "{{ pg_test_dr_target_host }}"
+  changed_when: true
+
+- name: "[dr] Start throwaway Postgres instance on alternate port"
+  ansible.builtin.command:
+    cmd: >
+      /usr/lib/postgresql/{{ pg_test_pg_version | default('16') }}/bin/pg_ctl
+      start -D {{ pg_test_dr_scratch_path }}
+      -l {{ pg_test_dr_scratch_path }}/dr_test_startup.log
+      -o "-p {{ pg_test_dr_scratch_port }} -c data_directory={{ pg_test_dr_scratch_path }} -c unix_socket_directories={{ pg_test_dr_scratch_path }} -c listen_addresses=''"
+  become: true
+  become_user: postgres
+  delegate_to: "{{ pg_test_dr_target_host }}"
+  changed_when: true
+
+- name: "[dr] Wait for throwaway instance to accept connections"
+  ansible.builtin.wait_for:
+    path: "{{ pg_test_dr_scratch_path }}/.s.PGSQL.{{ pg_test_dr_scratch_port }}"
+    timeout: 30
+  delegate_to: "{{ pg_test_dr_target_host }}"
+
+- name: "[dr] Query marker row from restored instance"
+  ansible.builtin.command:
+    cmd: >
+      psql -h {{ pg_test_dr_scratch_path }} -p {{ pg_test_dr_scratch_port }}
+      -U postgres -d {{ pg_test_db }} -tAc
+      "SELECT marker FROM pg_test_dr_marker WHERE marker = '{{ pg_test_dr_marker_value }}'"
+  become: true
+  become_user: postgres
+  delegate_to: "{{ pg_test_dr_target_host }}"
+  register: pg_test_dr_query_result
+  changed_when: false
+
+- name: "[dr] Stop throwaway Postgres instance"
+  ansible.builtin.command:
+    cmd: "/usr/lib/postgresql/{{ pg_test_pg_version | default('16') }}/bin/pg_ctl -D {{ pg_test_dr_scratch_path }} stop -m fast"
+  become: true
+  become_user: postgres
+  delegate_to: "{{ pg_test_dr_target_host }}"
+  changed_when: true
+  failed_when: false
+
+- name: "[dr] Clean up scratch directory"
+  ansible.builtin.file:
+    path: "{{ pg_test_dr_scratch_path }}"
+    state: absent
+  become: true
+  delegate_to: "{{ pg_test_dr_target_host }}"
+
+- name: "[dr] Remove marker row from live table"
+  community.postgresql.postgresql_query:
+    login_user: "{{ pg_test_admin_user }}"
+    db: "{{ pg_test_db }}"
+    query: "DELETE FROM pg_test_dr_marker WHERE marker = %s"
+    positional_args:
+      - "{{ pg_test_dr_marker_value }}"
+  become: true
+  become_user: postgres
+  delegate_to: "{{ pg_test_dr_leader.host }}"
+
+- name: "[dr] Assert marker survived restore"
+  ansible.builtin.assert:
+    that:
+      - pg_test_dr_query_result.stdout | trim == pg_test_dr_marker_value
+    fail_msg: "DISASTER RECOVERY TEST FAILED — marker row not found after pgBackRest restore. Backups may not be trustworthy."
+    success_msg: "Disaster recovery test PASSED — marker row survived full pgBackRest backup/restore cycle."
