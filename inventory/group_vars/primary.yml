@@ -5,6 +5,6 @@ postgresql_replication_primary_inventory_name: vm1
 postgresql_replication_primary_address: 192.168.163.129
 postgresql_replication_replica_addresses:
   - 192.168.163.128/32
+  - 192.168.163.134/32
 
 postgresql_replication_user: replicator
-postgresql_replication_password: "NEW_VALUE_2"
