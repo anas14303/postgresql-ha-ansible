@@ -1,0 +1,11 @@
+[global]
+repo1-path={{ pgbackrest_repo_path }}
+repo1-retention-full={{ pgbackrest_repo_retention_full }}
+
+[{{ pgbackrest_stanza }}]
+{% for host in groups['postgres_cluster'] %}
+pg{{ loop.index }}-path=/var/lib/postgresql/16/main
+pg{{ loop.index }}-host={{ hostvars[host].ansible_host }}
+pg{{ loop.index }}-host-user=postgres
+pg{{ loop.index }}-port=5432
+{% endfor %}

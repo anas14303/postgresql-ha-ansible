@@ -1,0 +1,49 @@
+---
+- name: Install pgbackrest on PostgreSQL node
+  ansible.builtin.apt:
+    name: "pgbackrest={{ pgbackrest_version }}"
+    state: present
+    update_cache: true
+- name: Create pgbackrest config directory
+  ansible.builtin.file:
+    path: /etc/pgbackrest
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0750'
+- name: Template pgbackrest.conf on PostgreSQL node
+  ansible.builtin.template:
+    src: pgbackrest_client.conf.j2
+    dest: /etc/pgbackrest/pgbackrest.conf
+    owner: postgres
+    group: postgres
+    mode: '0640'
+- name: Create .ssh directory for postgres user
+  ansible.builtin.file:
+    path: /var/lib/postgresql/.ssh
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+- name: Generate SSH key pair for postgres user
+  ansible.builtin.user:
+    name: postgres
+    generate_ssh_key: true
+    ssh_key_type: ed25519
+  register: postgres_ssh_key
+- name: Add vm4 (backup repo) host key to postgres user's known_hosts
+  ansible.builtin.known_hosts:
+    name: "{{ pgbackrest_repo_host }}"
+    key: "{{ lookup('pipe', 'ssh-keyscan -H ' + pgbackrest_repo_host) }}"
+    path: /var/lib/postgresql/.ssh/known_hosts
+    state: present
+  become: true
+  become_user: postgres
+- name: Show postgres user public key (needed for vm4 authorized_keys)
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: {{ postgres_ssh_key.ssh_public_key }}"
+- name: Authorize vm4 pgbackrest key on this postgres node
+  ansible.posix.authorized_key:
+    user: postgres
+    state: present
+    key: "{{ pgbackrest_repo_pubkey }}"

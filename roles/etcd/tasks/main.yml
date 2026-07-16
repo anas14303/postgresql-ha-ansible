@@ -1,0 +1,67 @@
+---
+- name: Check if etcd binary already installed
+  stat:
+    path: /usr/local/bin/etcd
+  register: etcd_bin
+
+- name: Check if etcd data directory already has data (protects an already-bootstrapped cluster)
+  find:
+    paths: "{{ etcd_data_dir }}"
+    file_type: any
+  register: etcd_data_check
+  ignore_errors: true
+
+- name: Warn and skip if etcd is already initialized
+  debug:
+    msg: >-
+      etcd data directory already contains data on {{ inventory_hostname }} —
+      skipping install/config to avoid disturbing an existing cluster's membership.
+      This role only bootstraps fresh nodes.
+  when: etcd_data_check.matched is defined and etcd_data_check.matched > 0
+
+- name: Download etcd release tarball
+  ansible.builtin.get_url:
+    url: "https://github.com/etcd-io/etcd/releases/download/v{{ etcd_version }}/etcd-v{{ etcd_version }}-linux-amd64.tar.gz"
+    dest: /tmp/etcd.tar.gz
+  when: not etcd_bin.stat.exists and (etcd_data_check.matched is not defined or etcd_data_check.matched == 0)
+
+- name: Extract etcd tarball
+  ansible.builtin.unarchive:
+    src: /tmp/etcd.tar.gz
+    dest: /tmp
+    remote_src: true
+  when: not etcd_bin.stat.exists and (etcd_data_check.matched is not defined or etcd_data_check.matched == 0)
+
+- name: Install etcd and etcdctl binaries
+  ansible.builtin.copy:
+    src: "/tmp/etcd-v{{ etcd_version }}-linux-amd64/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    mode: '0755'
+    remote_src: true
+  loop:
+    - etcd
+    - etcdctl
+  when: not etcd_bin.stat.exists and (etcd_data_check.matched is not defined or etcd_data_check.matched == 0)
+
+- name: Create etcd data directory
+  ansible.builtin.file:
+    path: "{{ etcd_data_dir }}"
+    state: directory
+    owner: root
+    mode: '0700'
+  when: etcd_data_check.matched is not defined or etcd_data_check.matched == 0
+
+- name: Template etcd systemd unit
+  ansible.builtin.template:
+    src: etcd.service.j2
+    dest: /etc/systemd/system/etcd.service
+  when: etcd_data_check.matched is not defined or etcd_data_check.matched == 0
+  notify: reload systemd and restart etcd
+
+- name: Enable and start etcd
+  ansible.builtin.systemd:
+    name: etcd
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: etcd_data_check.matched is not defined or etcd_data_check.matched == 0

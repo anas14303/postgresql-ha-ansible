@@ -1,0 +1,11 @@
+---
+pgbackrest_stanza: postgres-cluster
+pgbackrest_repo_host: 192.168.163.131
+pgbackrest_repo_path: /var/lib/pgbackrest
+pgbackrest_repo_user: pgbackrest
+pgbackrest_pg_data: /var/lib/postgresql/16/main
+pgbackrest_pg_port: 5432
+pgbackrest_pg_version: 16
+pgbackrest_version: "2.58.0-1.pgdg13+1"
+# Public key of vm4's pgbackrest user — needed for postgres→vm4 trust
+pgbackrest_repo_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHFPp7xDsm09NqLoJTLjYIjIY0H+ce7sKEjBhmIkUndA ansible-generated on server4"

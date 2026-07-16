@@ -1,0 +1,11 @@
+[global]
+repo1-host={{ pgbackrest_repo_host }}
+repo1-host-user={{ pgbackrest_repo_user }}
+repo1-path={{ pgbackrest_repo_path }}
+
+log-level-console=info
+log-level-file=detail
+
+[{{ pgbackrest_stanza }}]
+pg1-path={{ pgbackrest_pg_data }}
+pg1-port={{ pgbackrest_pg_port }}

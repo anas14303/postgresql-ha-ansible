@@ -1,0 +1,6 @@
+---
+- name: Set up pgBackRest client on PostgreSQL nodes
+  hosts: postgres_cluster
+  become: yes
+  roles:
+    - pgbackrest_client

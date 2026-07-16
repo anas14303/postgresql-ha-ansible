@@ -1,0 +1,6 @@
+---
+- name: Set up pgBackRest repository host
+  hosts: backup_repo
+  become: true
+  roles:
+    - role: pgbackrest_repo
