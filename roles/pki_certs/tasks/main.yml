@@ -1,0 +1,68 @@
+---
+- name: "[pki_certs:{{ pki_cert_role }}] Ensure hvac Python library is installed"
+  ansible.builtin.pip:
+    name: hvac
+    state: present
+    break_system_packages: true
+  become: true
+
+- name: "[pki_certs:{{ pki_cert_role }}] Authenticate to Vault via AppRole"
+  community.hashi_vault.vault_login:
+    url: "{{ vault_addr }}"
+    validate_certs: false
+    auth_method: approle
+    role_id: "{{ vault_pki_role_id }}"
+    secret_id: "{{ vault_pki_secret_id }}"
+  register: pki_vault_login
+  no_log: true
+
+- name: "[pki_certs:{{ pki_cert_role }}] Ensure cert destination directory exists"
+  ansible.builtin.file:
+    path: "{{ pki_cert_dest_dir }}"
+    state: directory
+    owner: "{{ pki_cert_owner }}"
+    group: "{{ pki_cert_group }}"
+    mode: '0750'
+  become: true
+
+- name: "[pki_certs:{{ pki_cert_role }}] Issue certificate from Vault PKI"
+  community.hashi_vault.vault_write:
+    url: "{{ vault_addr }}"
+    validate_certs: false
+    token: "{{ pki_vault_login.login.auth.client_token }}"
+    path: "{{ vault_pki_mount }}/issue/{{ pki_cert_role }}"
+    data:
+      common_name: "{{ pki_cert_common_name }}"
+      ip_sans: "{{ pki_cert_ip_sans }}"
+      ttl: "{{ pki_cert_ttl }}"
+  register: pki_issued_cert
+  no_log: true
+
+- name: "[pki_certs:{{ pki_cert_role }}] Write certificate"
+  ansible.builtin.copy:
+    content: "{{ pki_issued_cert.data.data.certificate }}"
+    dest: "{{ pki_cert_dest_dir }}/{{ pki_cert_role }}-cert.pem"
+    owner: "{{ pki_cert_owner }}"
+    group: "{{ pki_cert_group }}"
+    mode: "{{ pki_cert_mode }}"
+  become: true
+  no_log: true
+
+- name: "[pki_certs:{{ pki_cert_role }}] Write private key"
+  ansible.builtin.copy:
+    content: "{{ pki_issued_cert.data.data.private_key }}"
+    dest: "{{ pki_cert_dest_dir }}/{{ pki_cert_role }}-key.pem"
+    owner: "{{ pki_cert_owner }}"
+    group: "{{ pki_cert_group }}"
+    mode: '0400'
+  become: true
+  no_log: true
+
+- name: "[pki_certs:{{ pki_cert_role }}] Write CA chain"
+  ansible.builtin.copy:
+    content: "{{ pki_issued_cert.data.data.ca_chain | join('\n') }}"
+    dest: "{{ pki_cert_dest_dir }}/ca-chain.pem"
+    owner: "{{ pki_cert_owner }}"
+    group: "{{ pki_cert_group }}"
+    mode: '0444'
+  become: true

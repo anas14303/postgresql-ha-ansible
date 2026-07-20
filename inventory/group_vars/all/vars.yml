@@ -142,3 +142,8 @@ postgresql_ssl: true
 postgresql_ssl_ca_file: /etc/ssl/cluster/ca.crt
 postgresql_ssl_cert_file: /etc/ssl/cluster/server.crt
 postgresql_ssl_key_file: /etc/ssl/cluster/server.key
+
+# --- Vault PKI (etcd/Patroni/Postgres/HAProxy TLS) ---
+vault_addr: "https://192.168.163.131:8200"
+vault_pki_mount: "pki_int"
+vault_pki_role_id: "511ba44b-2111-7ccc-bda2-0cb95b37c441"

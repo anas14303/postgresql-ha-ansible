@@ -1,0 +1,48 @@
+---
+- name: Issue TLS certificates for etcd (peer + client)
+  hosts: etcd
+  become: true
+  vars:
+    pki_cert_role: etcd
+    pki_cert_common_name: "{{ ansible_host }}"
+    pki_cert_ip_sans: "{{ ansible_host }}"
+    pki_cert_owner: root
+    pki_cert_group: root
+  roles:
+    - pki_certs
+
+- name: Issue TLS certificates for Patroni REST API
+  hosts: postgres_cluster
+  become: true
+  vars:
+    pki_cert_role: patroni
+    pki_cert_common_name: "{{ ansible_host }}"
+    pki_cert_ip_sans: "{{ ansible_host }}"
+    pki_cert_owner: postgres
+    pki_cert_group: postgres
+  roles:
+    - pki_certs
+
+- name: Issue TLS certificates for PostgreSQL server
+  hosts: postgres_cluster
+  become: true
+  vars:
+    pki_cert_role: postgres
+    pki_cert_common_name: "{{ ansible_host }}"
+    pki_cert_ip_sans: "{{ ansible_host }}"
+    pki_cert_owner: postgres
+    pki_cert_group: postgres
+  roles:
+    - pki_certs
+
+- name: Issue TLS certificate for HAProxy
+  hosts: haproxy
+  become: true
+  vars:
+    pki_cert_role: haproxy
+    pki_cert_common_name: "{{ ansible_host }}"
+    pki_cert_ip_sans: "{{ ansible_host }}"
+    pki_cert_owner: haproxy
+    pki_cert_group: haproxy
+  roles:
+    - pki_certs

@@ -1,0 +1,10 @@
+---
+# Overridden per-service via vars: when this role is included
+pki_cert_role: ""            # e.g. etcd, patroni, postgres, haproxy
+pki_cert_common_name: "{{ ansible_host }}"
+pki_cert_ip_sans: "{{ ansible_host }}"
+pki_cert_ttl: "720h"
+pki_cert_dest_dir: "/etc/pki/postgres-devops"
+pki_cert_owner: root
+pki_cert_group: root
+pki_cert_mode: '0640'
